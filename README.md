@@ -19,13 +19,22 @@ copy .env.example .env    # en PowerShell: Copy-Item .env.example .env
 
 Editá `.env` y completá `SESSION_SECRET` con un texto largo aleatorio. `DISCORD_WEBHOOK_URL` ya viene con el webhook actual.
 
-## Crear el usuario admin
+## Crear usuarios de staff
 
 ```bash
 node scripts/seed-admin.js admin "tu-contraseña-segura"
 ```
 
-Podés correr este comando de nuevo con el mismo usuario para cambiarle la contraseña, o con otro usuario para crear más cuentas de staff.
+Ese usuario ve y gestiona postulaciones de **todos** los departamentos (staff del SAED). Para crear un usuario
+restringido a un solo departamento (por ejemplo, un coordinador de SAMS que no debería ver las postulaciones de
+SAFD), agregá el departamento como tercer argumento:
+
+```bash
+node scripts/seed-admin.js coord-sams "otra-contraseña-segura" sams
+node scripts/seed-admin.js coord-safd "otra-contraseña-segura" safd
+```
+
+Podés correr el comando de nuevo con el mismo usuario para cambiarle la contraseña o el departamento asignado.
 
 ## Correr la web
 
@@ -52,8 +61,9 @@ Pasos:
 2. Dejá "Managed Postgres" sin marcar.
 3. En "Config path" escribí `fly.toml` (no lo dejes vacío ni en `./`).
 4. Lanzá. Una vez creada la app, cargá los secrets en la pestaña **Secrets**: `SESSION_SECRET` y `DISCORD_WEBHOOK_URL`.
-5. Creá el usuario admin desde la consola web de la app (pestaña **Console** en el dashboard):
+5. Creá los usuarios de staff desde la consola web de la app (pestaña **Console** en el dashboard):
    ```bash
    node scripts/seed-admin.js admin tu-contraseña-segura
+   node scripts/seed-admin.js coord-sams otra-contraseña sams
    ```
    Como no hay volumen persistente, hay que repetir este paso después de cada redeploy.

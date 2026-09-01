@@ -3,6 +3,7 @@ let currentStatusFilter = '';
 let currentDepartmentFilter = '';
 let currentSearch = '';
 let currentId = null;
+let scopedDepartment = null;
 
 const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 
@@ -12,6 +13,7 @@ const modalBackdrop = document.getElementById('modal-backdrop');
 const whoamiEl = document.getElementById('whoami');
 const searchInput = document.getElementById('search-input');
 const toastContainer = document.getElementById('toast-container');
+const deptFilterRow = document.getElementById('dept-filter-row');
 
 async function checkSession() {
   const res = await fetch('/api/session');
@@ -20,7 +22,17 @@ async function checkSession() {
     window.location.href = '/login.html';
     return;
   }
-  whoamiEl.textContent = data.username;
+  scopedDepartment = data.department || null;
+  whoamiEl.textContent = scopedDepartment
+    ? `${data.username} · ${departmentLabel(scopedDepartment)}`
+    : data.username;
+
+  if (scopedDepartment) {
+    // Staff restringido a un departamento: no tiene sentido mostrar el
+    // selector, el servidor ya solo le devuelve ese departamento.
+    deptFilterRow.style.display = 'none';
+    currentDepartmentFilter = scopedDepartment;
+  }
 }
 
 async function loadApplications() {
@@ -51,7 +63,6 @@ function getFilteredApplications() {
   return applications.filter((a) => (
     a.full_name.toLowerCase().includes(term)
     || a.country.toLowerCase().includes(term)
-    || a.phone.toLowerCase().includes(term)
   ));
 }
 
@@ -77,7 +88,6 @@ function renderTable() {
       <td>${escapeHtml(a.full_name)}</td>
       <td>${a.age}</td>
       <td>${escapeHtml(a.country)}</td>
-      <td>${escapeHtml(a.phone)}</td>
       <td><span class="status-pill status-${a.status}">${capitalize(a.status)}</span></td>
       <td class="row-chevron">›</td>
     `;
@@ -96,8 +106,6 @@ function openModal(id) {
   document.getElementById('modal-department').innerHTML = `<span class="dept-badge dept-${a.department}">${departmentLabel(a.department)}</span>`;
   document.getElementById('modal-age').textContent = a.age;
   document.getElementById('modal-country').textContent = a.country;
-  document.getElementById('modal-phone').textContent = a.phone;
-  document.getElementById('modal-email').textContent = a.email || 'N/A';
   document.getElementById('modal-discord').textContent = a.discord_info || 'N/A';
   document.getElementById('modal-criminal').textContent = a.criminal_record;
   document.getElementById('modal-previous-saed').textContent = a.previous_saed_experience === 'Sí' && a.previous_saed_details

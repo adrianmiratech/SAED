@@ -44,7 +44,7 @@
     </div>
 
     <div class="card">
-      <div class="toolbar">
+      <div class="toolbar" id="dept-filter-row">
         <button class="btn dept-filter-btn active" data-department="">Todos los departamentos</button>
         <button class="btn dept-filter-btn" data-department="sams">SAMS</button>
         <button class="btn dept-filter-btn" data-department="safd">SAFD</button>
@@ -55,7 +55,7 @@
         <button class="btn filter-btn" data-status="aprobado">Aprobadas</button>
         <button class="btn filter-btn" data-status="rechazado">Rechazadas</button>
         <span style="flex:1"></span>
-        <input type="text" id="search-input" class="search-input" placeholder="Buscar por nombre, país o teléfono..." />
+        <input type="text" id="search-input" class="search-input" placeholder="Buscar por nombre o país..." />
         <button id="refresh-btn" class="btn btn-ghost btn-sm">Actualizar</button>
       </div>
 
@@ -68,7 +68,6 @@
               <th>Nombre</th>
               <th>Edad</th>
               <th>País</th>
-              <th>Teléfono</th>
               <th>Estado</th>
               <th></th>
             </tr>
@@ -100,8 +99,6 @@
       <div class="detail-grid">
         <div class="detail-item"><div class="k">Edad</div><div class="v" id="modal-age"></div></div>
         <div class="detail-item"><div class="k">País</div><div class="v" id="modal-country"></div></div>
-        <div class="detail-item"><div class="k">Teléfono</div><div class="v" id="modal-phone"></div></div>
-        <div class="detail-item"><div class="k">Correo</div><div class="v" id="modal-email"></div></div>
         <div class="detail-item"><div class="k">Usuario de Discord</div><div class="v" id="modal-discord"></div></div>
         <div class="detail-item"><div class="k">Antecedentes penales</div><div class="v" id="modal-criminal"></div></div>
       </div>

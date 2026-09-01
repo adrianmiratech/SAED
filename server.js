@@ -46,7 +46,8 @@ app.post('/api/login', (req, res) => {
   }
 
   req.session.adminUser = admin.username;
-  res.json({ ok: true, username: admin.username });
+  req.session.adminDepartment = admin.department || null;
+  res.json({ ok: true, username: admin.username, department: admin.department || null });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -55,14 +56,18 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/session', (req, res) => {
-  res.json({ authenticated: !!(req.session && req.session.adminUser), username: req.session?.adminUser || null });
+  res.json({
+    authenticated: !!(req.session && req.session.adminUser),
+    username: req.session?.adminUser || null,
+    department: req.session?.adminDepartment || null,
+  });
 });
 
 // ---------- Postulaciones (publico) ----------
 
 app.post('/api/applications', async (req, res) => {
   const {
-    department, fullName, age, country, phone, email,
+    department, fullName, age, country,
     discordInfo, experience, motivation, criminalRecord,
     previousSaedExperience, previousSaedDetails,
   } = req.body || {};
@@ -71,7 +76,7 @@ app.post('/api/applications', async (req, res) => {
     return res.status(400).json({ error: 'Departamento inválido' });
   }
 
-  if (!fullName || !age || !country || !phone || !discordInfo || !experience || !motivation || !criminalRecord || !previousSaedExperience) {
+  if (!fullName || !age || !country || !discordInfo || !experience || !motivation || !criminalRecord || !previousSaedExperience) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
 
@@ -82,20 +87,19 @@ app.post('/api/applications', async (req, res) => {
 
   const insert = db.prepare(`
     INSERT INTO applications
-      (department, full_name, age, country, phone, email, discord_info, experience, motivation, criminal_record,
+      (department, full_name, age, country, discord_info, experience, motivation, criminal_record,
        previous_saed_experience, previous_saed_details)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const info = insert.run(
-    department, fullName.trim(), ageNum, country.trim(), phone.trim(),
-    (email || '').trim() || null, discordInfo.trim(),
+    department, fullName.trim(), ageNum, country.trim(), discordInfo.trim(),
     experience.trim(), motivation.trim(), criminalRecord,
     previousSaedExperience, (previousSaedDetails || '').trim() || null,
   );
 
   try {
     await notifyDiscord({
-      department, fullName, age: ageNum, country, phone, email, discordInfo, experience, motivation, criminalRecord,
+      department, fullName, age: ageNum, country, discordInfo, experience, motivation, criminalRecord,
       previousSaedExperience, previousSaedDetails,
     });
   } catch (err) {
@@ -119,8 +123,6 @@ async function notifyDiscord(app_) {
       { name: 'Nombre y Apellido', value: app_.fullName, inline: true },
       { name: 'Edad', value: String(app_.age), inline: true },
       { name: 'País de Nacimiento', value: app_.country, inline: true },
-      { name: 'Teléfono', value: app_.phone, inline: true },
-      { name: 'Correo Electrónico', value: app_.email || 'N/A', inline: true },
       { name: 'Usuario de Discord', value: app_.discordInfo, inline: true },
       { name: 'Experiencia Previa', value: app_.experience.slice(0, 1024) },
       { name: 'Motivación', value: app_.motivation.slice(0, 1024) },
@@ -144,8 +146,20 @@ async function notifyDiscord(app_) {
 
 // ---------- Postulaciones (admin) ----------
 
+// Si el admin tiene un departamento asignado, solo puede ver/gestionar
+// postulaciones de ese departamento (staff sin departamento asignado ve todo).
+function requireDepartmentAccess(req, res, row) {
+  const scopedDept = req.session.adminDepartment;
+  if (scopedDept && row.department !== scopedDept) {
+    res.status(404).json({ error: 'No encontrada' });
+    return false;
+  }
+  return true;
+}
+
 app.get('/api/applications', requireAuth, (req, res) => {
   const { status, department } = req.query;
+  const scopedDept = req.session.adminDepartment;
   const conditions = [];
   const params = [];
 
@@ -153,7 +167,10 @@ app.get('/api/applications', requireAuth, (req, res) => {
     conditions.push('status = ?');
     params.push(status);
   }
-  if (department && VALID_DEPARTMENTS.includes(department)) {
+  if (scopedDept) {
+    conditions.push('department = ?');
+    params.push(scopedDept);
+  } else if (department && VALID_DEPARTMENTS.includes(department)) {
     conditions.push('department = ?');
     params.push(department);
   }
@@ -166,6 +183,7 @@ app.get('/api/applications', requireAuth, (req, res) => {
 app.get('/api/applications/:id', requireAuth, (req, res) => {
   const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
   res.json(row);
 });
 
@@ -173,6 +191,7 @@ app.patch('/api/applications/:id', requireAuth, (req, res) => {
   const { status, reviewNotes } = req.body || {};
   const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
 
   if (status && !VALID_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Estado inválido' });
@@ -193,6 +212,10 @@ app.patch('/api/applications/:id', requireAuth, (req, res) => {
 });
 
 app.delete('/api/applications/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
   db.prepare('DELETE FROM applications WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });

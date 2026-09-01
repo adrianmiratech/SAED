@@ -12,8 +12,6 @@ db.exec(`
     full_name TEXT NOT NULL,
     age INTEGER NOT NULL,
     country TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    email TEXT,
     discord_info TEXT,
     experience TEXT NOT NULL,
     motivation TEXT NOT NULL,
@@ -31,6 +29,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    department TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
@@ -51,15 +50,35 @@ if (!columns.some((c) => c.name === 'previous_saed_details')) {
 // Renombra el departamento de bomberos a su clave actual (SAFD).
 db.exec("UPDATE applications SET department = 'safd' WHERE department = 'bomberos'");
 
+// Se dejaron de pedir teléfono y correo electrónico: se quitan las columnas
+// si la base ya existía con ellas (silencioso si el motor SQLite no soporta
+// DROP COLUMN, la columna simplemente queda sin usarse).
+for (const col of ['phone', 'email']) {
+  if (columns.some((c) => c.name === col)) {
+    try {
+      db.exec(`ALTER TABLE applications DROP COLUMN ${col}`);
+    } catch {
+      // Motor SQLite viejo sin soporte para DROP COLUMN: se ignora.
+    }
+  }
+}
+
+// Migración: agrega la columna department a admins si la base ya existía sin
+// ella (los admins previos quedan sin restricción, es decir, ven todo).
+const adminColumns = db.prepare('PRAGMA table_info(admins)').all();
+if (!adminColumns.some((c) => c.name === 'department')) {
+  db.exec('ALTER TABLE admins ADD COLUMN department TEXT');
+}
+
 // En Vercel /tmp se resetea en cada arranque en frío de la función, así que
 // el usuario admin se re-siembra desde variables de entorno en cada cold start.
 if (process.env.VERCEL && process.env.ADMIN_USER && process.env.ADMIN_PASSWORD) {
   const bcrypt = require('bcryptjs');
   const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD, 10);
   db.prepare(`
-    INSERT INTO admins (username, password_hash) VALUES (?, ?)
-    ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash
-  `).run(process.env.ADMIN_USER, hash);
+    INSERT INTO admins (username, password_hash, department) VALUES (?, ?, ?)
+    ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, department = excluded.department
+  `).run(process.env.ADMIN_USER, hash, process.env.ADMIN_DEPARTMENT || null);
 }
 
 module.exports = db;

@@ -28,8 +28,6 @@ form.addEventListener('submit', async (e) => {
     fullName: document.getElementById('fullName').value.trim(),
     age: document.getElementById('age').value,
     country: document.getElementById('country').value.trim(),
-    phone: document.getElementById('phone').value.trim(),
-    email: document.getElementById('email').value.trim(),
     discordInfo: document.getElementById('discordInfo').value.trim(),
     experience: document.getElementById('experience').value.trim(),
     motivation: document.getElementById('motivation').value.trim(),
