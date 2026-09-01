@@ -1,10 +1,17 @@
 const form = document.getElementById('app-form');
 const messageEl = document.getElementById('message');
 const departmentEl = document.getElementById('department');
+const previousSaedDetailsWrap = document.getElementById('previousSaedDetailsWrap');
 
 document.querySelectorAll('.dept-apply').forEach((btn) => {
   btn.addEventListener('click', () => {
     departmentEl.value = btn.dataset.department;
+  });
+});
+
+form.querySelectorAll('input[name="previousSaedExperience"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    previousSaedDetailsWrap.style.display = radio.value === 'Sí' && radio.checked ? 'block' : 'none';
   });
 });
 
@@ -14,6 +21,7 @@ form.addEventListener('submit', async (e) => {
   messageEl.textContent = '';
 
   const criminalRecordEl = form.querySelector('input[name="criminalRecord"]:checked');
+  const previousSaedEl = form.querySelector('input[name="previousSaedExperience"]:checked');
 
   const payload = {
     department: departmentEl.value,
@@ -26,6 +34,8 @@ form.addEventListener('submit', async (e) => {
     experience: document.getElementById('experience').value.trim(),
     motivation: document.getElementById('motivation').value.trim(),
     criminalRecord: criminalRecordEl ? criminalRecordEl.value : '',
+    previousSaedExperience: previousSaedEl ? previousSaedEl.value : '',
+    previousSaedDetails: document.getElementById('previousSaedDetails').value.trim(),
   };
 
   const submitBtn = form.querySelector('button[type="submit"]');
@@ -46,6 +56,7 @@ form.addEventListener('submit', async (e) => {
     messageEl.className = 'message success';
     messageEl.textContent = '¡Postulación enviada con éxito! El equipo del SAED la revisará pronto.';
     form.reset();
+    previousSaedDetailsWrap.style.display = 'none';
   } catch (err) {
     messageEl.className = 'message error';
     messageEl.textContent = err.message;

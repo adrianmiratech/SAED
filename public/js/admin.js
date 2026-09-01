@@ -73,6 +73,9 @@ function openModal(id) {
   document.getElementById('modal-email').textContent = a.email || 'N/A';
   document.getElementById('modal-discord').textContent = a.discord_info || 'N/A';
   document.getElementById('modal-criminal').textContent = a.criminal_record;
+  document.getElementById('modal-previous-saed').textContent = a.previous_saed_experience === 'Sí' && a.previous_saed_details
+    ? `Sí — ${a.previous_saed_details}`
+    : a.previous_saed_experience;
   document.getElementById('modal-experience').textContent = a.experience;
   document.getElementById('modal-motivation').textContent = a.motivation;
   document.getElementById('modal-notes').value = a.review_notes || '';

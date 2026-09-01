@@ -157,6 +157,17 @@
           <label><input type="radio" name="criminalRecord" value="Sí" /> Sí</label>
         </div>
 
+        <label>¿Has roleado anteriormente en SAED, ya sea en HiddenRP o en versiones anteriores? *</label>
+        <div class="radio-group">
+          <label><input type="radio" name="previousSaedExperience" value="No" required /> No</label>
+          <label><input type="radio" name="previousSaedExperience" value="Sí" /> Sí</label>
+        </div>
+
+        <div id="previousSaedDetailsWrap" class="hidden-field" style="display:none">
+          <label for="previousSaedDetails">Contanos en qué departamento, servidor y hasta cuándo <span class="hint">(opcional)</span></label>
+          <textarea id="previousSaedDetails" placeholder="Ej: SAMS en HiddenRP, del 2023 al 2024"></textarea>
+        </div>
+
         <div class="submit-row">
           <button type="submit" class="btn-primary">Enviar postulación</button>
         </div>

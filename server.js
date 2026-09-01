@@ -62,13 +62,14 @@ app.post('/api/applications', async (req, res) => {
   const {
     department, fullName, age, country, phone, email,
     discordInfo, experience, motivation, criminalRecord,
+    previousSaedExperience, previousSaedDetails,
   } = req.body || {};
 
   if (!VALID_DEPARTMENTS.includes(department)) {
     return res.status(400).json({ error: 'Departamento inválido' });
   }
 
-  if (!fullName || !age || !country || !phone || !experience || !motivation || !criminalRecord) {
+  if (!fullName || !age || !country || !phone || !experience || !motivation || !criminalRecord || !previousSaedExperience) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
 
@@ -79,17 +80,20 @@ app.post('/api/applications', async (req, res) => {
 
   const insert = db.prepare(`
     INSERT INTO applications
-      (department, full_name, age, country, phone, email, discord_info, experience, motivation, criminal_record)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (department, full_name, age, country, phone, email, discord_info, experience, motivation, criminal_record,
+       previous_saed_experience, previous_saed_details)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const info = insert.run(
     department, fullName.trim(), ageNum, country.trim(), phone.trim(),
     (email || '').trim() || null, (discordInfo || '').trim() || null,
     experience.trim(), motivation.trim(), criminalRecord,
+    previousSaedExperience, (previousSaedDetails || '').trim() || null,
   );
 
   notifyDiscord({
     department, fullName, age: ageNum, country, phone, email, discordInfo, experience, motivation, criminalRecord,
+    previousSaedExperience, previousSaedDetails,
   }).catch((err) => console.error('Error enviando a Discord:', err.message));
 
   res.status(201).json({ ok: true, id: info.lastInsertRowid });
@@ -115,6 +119,12 @@ async function notifyDiscord(app_) {
       { name: 'Experiencia Previa', value: app_.experience.slice(0, 1024) },
       { name: 'Motivación', value: app_.motivation.slice(0, 1024) },
       { name: '¿Tiene antecedentes penales?', value: app_.criminalRecord },
+      {
+        name: '¿Ha roleado antes en SAED (HiddenRP u otras versiones)?',
+        value: app_.previousSaedExperience === 'Sí' && app_.previousSaedDetails
+          ? `Sí — ${app_.previousSaedDetails.slice(0, 900)}`
+          : app_.previousSaedExperience,
+      },
     ],
     timestamp: new Date().toISOString(),
   };

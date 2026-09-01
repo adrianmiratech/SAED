@@ -18,6 +18,8 @@ db.exec(`
     experience TEXT NOT NULL,
     motivation TEXT NOT NULL,
     criminal_record TEXT NOT NULL,
+    previous_saed_experience TEXT NOT NULL DEFAULT 'No',
+    previous_saed_details TEXT,
     status TEXT NOT NULL DEFAULT 'pendiente',
     review_notes TEXT,
     reviewed_by TEXT,
@@ -38,6 +40,12 @@ db.exec(`
 const columns = db.prepare("PRAGMA table_info(applications)").all();
 if (!columns.some((c) => c.name === 'department')) {
   db.exec("ALTER TABLE applications ADD COLUMN department TEXT NOT NULL DEFAULT 'sams'");
+}
+if (!columns.some((c) => c.name === 'previous_saed_experience')) {
+  db.exec("ALTER TABLE applications ADD COLUMN previous_saed_experience TEXT NOT NULL DEFAULT 'No'");
+}
+if (!columns.some((c) => c.name === 'previous_saed_details')) {
+  db.exec('ALTER TABLE applications ADD COLUMN previous_saed_details TEXT');
 }
 
 // En Vercel /tmp se resetea en cada arranque en frío de la función, así que
