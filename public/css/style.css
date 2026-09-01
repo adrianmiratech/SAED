@@ -402,6 +402,41 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   margin: 12px 0 0;
 }
 
+.staff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.staff-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.staff-row .staff-username {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.staff-row .staff-meta {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.staff-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
 .detail-item .k {
   color: var(--text-muted);
   font-size: 12px;

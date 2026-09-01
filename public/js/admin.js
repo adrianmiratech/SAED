@@ -4,6 +4,7 @@ let currentDepartmentFilter = '';
 let currentSearch = '';
 let currentId = null;
 let scopedDepartment = null;
+let currentUsername = null;
 
 const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 
@@ -14,6 +15,11 @@ const whoamiEl = document.getElementById('whoami');
 const searchInput = document.getElementById('search-input');
 const toastContainer = document.getElementById('toast-container');
 const deptFilterRow = document.getElementById('dept-filter-row');
+const manageStaffBtn = document.getElementById('manage-staff-btn');
+const staffModalBackdrop = document.getElementById('staff-modal-backdrop');
+const staffList = document.getElementById('staff-list');
+const staffForm = document.getElementById('staff-form');
+const staffMessage = document.getElementById('staff-message');
 
 async function checkSession() {
   const res = await fetch('/api/session');
@@ -23,6 +29,7 @@ async function checkSession() {
     return;
   }
   scopedDepartment = data.department || null;
+  currentUsername = data.username;
   whoamiEl.textContent = scopedDepartment
     ? `${data.username} · ${departmentLabel(scopedDepartment)}`
     : data.username;
@@ -32,6 +39,9 @@ async function checkSession() {
     // selector, el servidor ya solo le devuelve ese departamento.
     deptFilterRow.style.display = 'none';
     currentDepartmentFilter = scopedDepartment;
+  } else {
+    // Solo el staff sin departamento asignado gestiona otras cuentas.
+    manageStaffBtn.style.display = 'inline-flex';
   }
 }
 
@@ -175,6 +185,103 @@ async function deleteApplication() {
   showToast('Postulación eliminada.', 'danger');
 }
 
+async function loadStaff() {
+  const res = await fetch('/api/admins');
+  if (!res.ok) return;
+  const staff = await res.json();
+  renderStaffList(staff);
+}
+
+function renderStaffList(staff) {
+  staffList.innerHTML = '';
+  if (staff.length === 0) {
+    staffList.innerHTML = '<div class="staff-empty">No hay usuarios cargados.</div>';
+    return;
+  }
+  for (const s of staff) {
+    const row = document.createElement('div');
+    row.className = 'staff-row';
+    const deptBadge = s.department
+      ? `<span class="dept-badge dept-${s.department}">${departmentLabel(s.department)}</span>`
+      : '<span class="dept-badge">Todos</span>';
+    row.innerHTML = `
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(s.username)}</span>
+        ${deptBadge}
+      </div>
+      <button class="btn btn-danger btn-sm" data-delete-staff="${s.id}" ${s.username === currentUsername ? 'disabled' : ''}>Eliminar</button>
+    `;
+    staffList.appendChild(row);
+  }
+
+  staffList.querySelectorAll('[data-delete-staff]').forEach((btn) => {
+    btn.addEventListener('click', () => deleteStaff(btn.dataset.deleteStaff));
+  });
+}
+
+async function deleteStaff(id) {
+  if (!confirm('¿Eliminar este usuario de staff?')) return;
+  const res = await fetch(`/api/admins/${id}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (!res.ok) {
+    showToast(data.error || 'No se pudo eliminar el usuario', 'danger');
+    return;
+  }
+  showToast('Usuario eliminado.');
+  loadStaff();
+}
+
+function openStaffModal() {
+  staffMessage.className = 'message';
+  staffMessage.textContent = '';
+  staffForm.reset();
+  staffModalBackdrop.classList.add('open');
+  loadStaff();
+}
+
+function closeStaffModal() {
+  staffModalBackdrop.classList.remove('open');
+}
+
+staffForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  staffMessage.className = 'message';
+  staffMessage.textContent = '';
+
+  const username = document.getElementById('staff-username').value.trim();
+  const password = document.getElementById('staff-password').value;
+  const department = document.getElementById('staff-department').value;
+
+  const submitBtn = staffForm.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+
+  try {
+    const res = await fetch('/api/admins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, department: department || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo crear el usuario');
+
+    staffMessage.className = 'message success';
+    staffMessage.textContent = `Usuario "${data.username}" creado.`;
+    staffForm.reset();
+    loadStaff();
+  } catch (err) {
+    staffMessage.className = 'message error';
+    staffMessage.textContent = err.message;
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+manageStaffBtn.addEventListener('click', openStaffModal);
+document.getElementById('staff-modal-close').addEventListener('click', closeStaffModal);
+staffModalBackdrop.addEventListener('click', (e) => {
+  if (e.target === staffModalBackdrop) closeStaffModal();
+});
+
 function formatDate(iso) {
   if (!iso) return '';
   const d = new Date(iso.replace(' ', 'T') + 'Z');
@@ -225,7 +332,9 @@ modalBackdrop.addEventListener('click', (e) => {
   if (e.target === modalBackdrop) closeModal();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && modalBackdrop.classList.contains('open')) closeModal();
+  if (e.key !== 'Escape') return;
+  if (modalBackdrop.classList.contains('open')) closeModal();
+  if (staffModalBackdrop.classList.contains('open')) closeStaffModal();
 });
 document.querySelectorAll('[data-action]').forEach((btn) => {
   btn.addEventListener('click', () => updateStatus(btn.dataset.action, btn));

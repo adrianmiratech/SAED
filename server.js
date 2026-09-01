@@ -28,6 +28,13 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: 'No autenticado' });
 }
 
+// Solo el staff sin departamento asignado (ve todo, nivel SAED) puede
+// crear o borrar otras cuentas de staff.
+function requireSuperAdmin(req, res, next) {
+  if (req.session && req.session.adminUser && !req.session.adminDepartment) return next();
+  return res.status(403).json({ error: 'No autorizado' });
+}
+
 const VALID_STATUSES = ['pendiente', 'aprobado', 'rechazado'];
 const VALID_DEPARTMENTS = ['sams', 'safd'];
 const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
@@ -61,6 +68,57 @@ app.get('/api/session', (req, res) => {
     username: req.session?.adminUser || null,
     department: req.session?.adminDepartment || null,
   });
+});
+
+// ---------- Staff ----------
+
+app.get('/api/admins', requireAuth, requireSuperAdmin, (req, res) => {
+  const rows = db.prepare('SELECT id, username, department, created_at FROM admins ORDER BY created_at ASC').all();
+  res.json(rows);
+});
+
+app.post('/api/admins', requireAuth, requireSuperAdmin, (req, res) => {
+  const { username, password, department } = req.body || {};
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+  }
+  if (department && !VALID_DEPARTMENTS.includes(department)) {
+    return res.status(400).json({ error: 'Departamento inválido' });
+  }
+
+  const existing = db.prepare('SELECT id FROM admins WHERE username = ?').get(username.trim());
+  if (existing) {
+    return res.status(409).json({ error: 'Ya existe un usuario con ese nombre' });
+  }
+
+  const hash = bcrypt.hashSync(password, 10);
+  const info = db.prepare('INSERT INTO admins (username, password_hash, department) VALUES (?, ?, ?)')
+    .run(username.trim(), hash, department || null);
+
+  res.status(201).json({ id: info.lastInsertRowid, username: username.trim(), department: department || null });
+});
+
+app.delete('/api/admins/:id', requireAuth, requireSuperAdmin, (req, res) => {
+  const target = db.prepare('SELECT * FROM admins WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'No encontrado' });
+
+  if (target.username === req.session.adminUser) {
+    return res.status(400).json({ error: 'No podés eliminar tu propia cuenta' });
+  }
+
+  if (!target.department) {
+    const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM admins WHERE department IS NULL').get().c;
+    if (superAdminCount <= 1) {
+      return res.status(400).json({ error: 'No podés eliminar el único usuario con acceso a todos los departamentos' });
+    }
+  }
+
+  db.prepare('DELETE FROM admins WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
 });
 
 // ---------- Postulaciones (publico) ----------
