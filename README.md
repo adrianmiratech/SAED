@@ -37,41 +37,23 @@ Por defecto queda disponible en http://localhost:3000
 
 ## Publicarla gratis en Fly.io
 
-El repo ya incluye `Dockerfile` y `fly.toml` listos para desplegar. Fly.io construye la imagen en la nube, así que no
-hace falta tener Docker instalado localmente.
+El repo incluye `Dockerfile` y `fly.toml` listos para desplegar desde el dashboard de Fly.io ("Launch an App from
+GitHub"), sin necesitar Docker ni flyctl instalados localmente.
 
-1. Instalá flyctl (PowerShell):
-   ```powershell
-   iwr https://fly.io/install.ps1 -useb | iex
-   ```
-   Cerrá y volvé a abrir la terminal para que quede en el PATH.
+**Nota:** esta configuración guarda la SQLite dentro del propio contenedor, sin volumen persistente. Es decir, los
+datos sobreviven mientras la máquina esté corriendo o solo detenida, pero **se pierden en cada redeploy** (cada
+`git push`). Es la opción elegida para un despliegue temporal / de prueba. Si más adelante se necesita que las
+postulaciones no se pierdan entre redeploys, hay que volver a agregar un volumen persistente (`fly volumes create`)
+y montar `DB_PATH` sobre él.
 
-2. Iniciá sesión (abre el navegador, es gratis, puede pedir una tarjeta solo para verificar que no sos un bot, no cobra nada en el plan free):
+Pasos:
+
+1. En https://fly.io/dashboard → "Launch an App" → "Deploy from GitHub" → elegí este repo.
+2. Dejá "Managed Postgres" sin marcar.
+3. En "Config path" escribí `fly.toml` (no lo dejes vacío ni en `./`).
+4. Lanzá. Una vez creada la app, cargá los secrets en la pestaña **Secrets**: `SESSION_SECRET` y `DISCORD_WEBHOOK_URL`.
+5. Creá el usuario admin desde la consola web de la app (pestaña **Console** en el dashboard):
    ```bash
-   fly auth login
+   node scripts/seed-admin.js admin tu-contraseña-segura
    ```
-
-3. Creá la app (elegí un nombre único, por ejemplo `saed-postulaciones-tuservidor`) y el volumen donde vive la SQLite:
-   ```bash
-   fly apps create saed-postulaciones-tuservidor
-   fly volumes create sams_data --region eze --size 1 -a saed-postulaciones-tuservidor
-   ```
-   Editá `fly.toml` y descomentá/completá la línea `app = "..."` con el mismo nombre.
-
-4. Cargá los secretos (no van en el repo):
-   ```bash
-   fly secrets set SESSION_SECRET="un-texto-largo-y-aleatorio" DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..." -a saed-postulaciones-tuservidor
-   ```
-
-5. Desplegá:
-   ```bash
-   fly deploy -a saed-postulaciones-tuservidor
-   ```
-
-6. Creá el usuario admin dentro del contenedor ya desplegado:
-   ```bash
-   fly ssh console -a saed-postulaciones-tuservidor -C "node scripts/seed-admin.js admin tu-contraseña-segura"
-   ```
-
-Tu web queda disponible en `https://saed-postulaciones-tuservidor.fly.dev`. El free tier de Fly.io incluye hasta 3
-VMs compartidas y 3GB de volumen persistente, así que la base SQLite sobrevive redeploys y reinicios.
+   Como no hay volumen persistente, hay que repetir este paso después de cada redeploy.

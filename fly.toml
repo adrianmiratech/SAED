@@ -5,11 +5,6 @@ primary_region = "eze" # Buenos Aires. Alternativas: "gru" (São Paulo), "mia" (
 
 [env]
   PORT = "3000"
-  DB_PATH = "/data/data.sqlite"
-
-[[mounts]]
-  source = "sams_data"
-  destination = "/data"
 
 [http_service]
   internal_port = 3000
