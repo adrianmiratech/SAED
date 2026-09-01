@@ -1,6 +1,7 @@
 let applications = [];
 let currentStatusFilter = '';
 let currentDepartmentFilter = '';
+let currentSearch = '';
 let currentId = null;
 
 const DEPARTMENT_LABELS = { sams: 'SAMS', bomberos: 'Bomberos' };
@@ -9,6 +10,8 @@ const tableBody = document.getElementById('table-body');
 const emptyEl = document.getElementById('empty');
 const modalBackdrop = document.getElementById('modal-backdrop');
 const whoamiEl = document.getElementById('whoami');
+const searchInput = document.getElementById('search-input');
+const toastContainer = document.getElementById('toast-container');
 
 async function checkSession() {
   const res = await fetch('/api/session');
@@ -31,18 +34,41 @@ async function loadApplications() {
     return;
   }
   applications = await res.json();
+  renderStats();
   renderTable();
 }
 
+function renderStats() {
+  document.getElementById('stat-total').textContent = applications.length;
+  document.getElementById('stat-pendiente').textContent = applications.filter((a) => a.status === 'pendiente').length;
+  document.getElementById('stat-aprobado').textContent = applications.filter((a) => a.status === 'aprobado').length;
+  document.getElementById('stat-rechazado').textContent = applications.filter((a) => a.status === 'rechazado').length;
+}
+
+function getFilteredApplications() {
+  if (!currentSearch) return applications;
+  const term = currentSearch.toLowerCase();
+  return applications.filter((a) => (
+    a.full_name.toLowerCase().includes(term)
+    || a.country.toLowerCase().includes(term)
+    || a.phone.toLowerCase().includes(term)
+  ));
+}
+
 function renderTable() {
+  const rows = getFilteredApplications();
   tableBody.innerHTML = '';
-  if (applications.length === 0) {
+
+  if (rows.length === 0) {
     emptyEl.style.display = 'block';
+    emptyEl.querySelector('p').textContent = currentSearch
+      ? 'No hay postulaciones que coincidan con la búsqueda.'
+      : 'No hay postulaciones en esta categoría.';
     return;
   }
   emptyEl.style.display = 'none';
 
-  for (const a of applications) {
+  for (const a of rows) {
     const tr = document.createElement('tr');
     tr.className = 'row-link';
     tr.innerHTML = `
@@ -53,6 +79,7 @@ function renderTable() {
       <td>${escapeHtml(a.country)}</td>
       <td>${escapeHtml(a.phone)}</td>
       <td><span class="status-pill status-${a.status}">${capitalize(a.status)}</span></td>
+      <td class="row-chevron">›</td>
     `;
     tr.addEventListener('click', () => openModal(a.id));
     tableBody.appendChild(tr);
@@ -80,8 +107,7 @@ function openModal(id) {
   document.getElementById('modal-motivation').textContent = a.motivation;
   document.getElementById('modal-notes').value = a.review_notes || '';
 
-  const statusEl = document.getElementById('modal-status');
-  statusEl.innerHTML = `<span class="status-pill status-${a.status}">${capitalize(a.status)}</span>`;
+  document.getElementById('modal-status').innerHTML = `<span class="status-pill status-${a.status}">${capitalize(a.status)}</span>`;
 
   const reviewedWrap = document.getElementById('modal-reviewed-wrap');
   if (a.reviewed_by) {
@@ -99,16 +125,37 @@ function closeModal() {
   currentId = null;
 }
 
-async function updateStatus(status) {
+function showToast(message, type = 'ok') {
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  toastContainer.appendChild(toast);
+  setTimeout(() => toast.classList.add('show'), 10);
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 200);
+  }, 2600);
+}
+
+async function updateStatus(status, btn) {
   if (!currentId) return;
   const reviewNotes = document.getElementById('modal-notes').value;
-  await fetch(`/api/applications/${currentId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status, reviewNotes }),
-  });
-  closeModal();
-  loadApplications();
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+  try {
+    await fetch(`/api/applications/${currentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, reviewNotes }),
+    });
+    closeModal();
+    await loadApplications();
+    showToast('Postulación actualizada.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 }
 
 async function deleteApplication() {
@@ -116,7 +163,8 @@ async function deleteApplication() {
   if (!confirm('¿Eliminar esta postulación permanentemente?')) return;
   await fetch(`/api/applications/${currentId}`, { method: 'DELETE' });
   closeModal();
-  loadApplications();
+  await loadApplications();
+  showToast('Postulación eliminada.', 'danger');
 }
 
 function formatDate(iso) {
@@ -157,14 +205,22 @@ document.querySelectorAll('.dept-filter-btn').forEach((btn) => {
   });
 });
 
+searchInput.addEventListener('input', () => {
+  currentSearch = searchInput.value.trim();
+  renderTable();
+});
+
 document.getElementById('refresh-btn').addEventListener('click', loadApplications);
 document.getElementById('modal-close').addEventListener('click', closeModal);
 document.getElementById('modal-delete').addEventListener('click', deleteApplication);
 modalBackdrop.addEventListener('click', (e) => {
   if (e.target === modalBackdrop) closeModal();
 });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && modalBackdrop.classList.contains('open')) closeModal();
+});
 document.querySelectorAll('[data-action]').forEach((btn) => {
-  btn.addEventListener('click', () => updateStatus(btn.dataset.action));
+  btn.addEventListener('click', () => updateStatus(btn.dataset.action, btn));
 });
 
 document.getElementById('logout-btn').addEventListener('click', async () => {

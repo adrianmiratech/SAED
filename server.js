@@ -1,7 +1,7 @@
 require('dotenv').config();
 const path = require('path');
 const express = require('express');
-const session = require('express-session');
+const cookieSession = require('cookie-session');
 const bcrypt = require('bcryptjs');
 const db = require('./db');
 
@@ -12,14 +12,15 @@ const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.use(session({
+// Sesión firmada en la propia cookie (sin estado en el servidor), para que
+// funcione igual en un servidor tradicional (Fly) o en funciones serverless
+// con múltiples instancias que no comparten memoria (Vercel).
+app.use(cookieSession({
+  name: 'session',
   secret: process.env.SESSION_SECRET || 'dev-secret-cambiame',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    maxAge: 8 * 60 * 60 * 1000, // 8 horas
-    httpOnly: true,
-  },
+  maxAge: 8 * 60 * 60 * 1000, // 8 horas
+  httpOnly: true,
+  sameSite: 'lax',
 }));
 
 function requireAuth(req, res, next) {
@@ -49,7 +50,8 @@ app.post('/api/login', (req, res) => {
 });
 
 app.post('/api/logout', (req, res) => {
-  req.session.destroy(() => res.json({ ok: true }));
+  req.session = null;
+  res.json({ ok: true });
 });
 
 app.get('/api/session', (req, res) => {

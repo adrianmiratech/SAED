@@ -8,14 +8,40 @@
 </head>
 <body>
   <div class="topbar">
-    <div class="brand"><span class="badge">SAED</span> Panel de Postulaciones</div>
+    <div class="brand">
+      <span class="brand-mark">✚</span>
+      <span class="brand-text">
+        <span class="name">SAED</span>
+        <span class="tagline">Panel de Postulaciones</span>
+      </span>
+    </div>
     <div class="top-actions">
+      <a href="/" class="muted-link">Ver sitio público</a>
       <span id="whoami" class="muted-link"></span>
       <button id="logout-btn" class="btn-ghost btn-sm">Cerrar sesión</button>
     </div>
   </div>
 
   <div class="container wide">
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-total">–</div>
+        <div class="stat-label">Total</div>
+      </div>
+      <div class="stat-card stat-pendiente">
+        <div class="stat-value" id="stat-pendiente">–</div>
+        <div class="stat-label">Pendientes</div>
+      </div>
+      <div class="stat-card stat-aprobado">
+        <div class="stat-value" id="stat-aprobado">–</div>
+        <div class="stat-label">Aprobadas</div>
+      </div>
+      <div class="stat-card stat-rechazado">
+        <div class="stat-value" id="stat-rechazado">–</div>
+        <div class="stat-label">Rechazadas</div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="toolbar">
         <button class="btn dept-filter-btn active" data-department="">Todos los departamentos</button>
@@ -28,6 +54,7 @@
         <button class="btn filter-btn" data-status="aprobado">Aprobadas</button>
         <button class="btn filter-btn" data-status="rechazado">Rechazadas</button>
         <span style="flex:1"></span>
+        <input type="text" id="search-input" class="search-input" placeholder="Buscar por nombre, país o teléfono..." />
         <button id="refresh-btn" class="btn btn-ghost btn-sm">Actualizar</button>
       </div>
 
@@ -42,37 +69,53 @@
               <th>País</th>
               <th>Teléfono</th>
               <th>Estado</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="table-body"></tbody>
         </table>
-        <div id="empty" class="empty-state" style="display:none">No hay postulaciones en esta categoría.</div>
+        <div id="empty" class="empty-state" style="display:none">
+          <div class="empty-icon">📭</div>
+          <p>No hay postulaciones en esta categoría.</p>
+        </div>
       </div>
     </div>
   </div>
 
   <div class="modal-backdrop" id="modal-backdrop">
     <div class="modal">
-      <h2 id="modal-name"></h2>
-      <p class="subtitle" id="modal-date"></p>
+      <div class="modal-header">
+        <div>
+          <h2 id="modal-name"></h2>
+          <p class="subtitle" id="modal-date"></p>
+        </div>
+        <div class="modal-header-badges">
+          <span id="modal-department"></span>
+          <span id="modal-status"></span>
+        </div>
+      </div>
 
+      <h3 class="modal-section-title">Datos de contacto</h3>
       <div class="detail-grid">
-        <div class="detail-item"><div class="k">Departamento</div><div class="v" id="modal-department"></div></div>
         <div class="detail-item"><div class="k">Edad</div><div class="v" id="modal-age"></div></div>
         <div class="detail-item"><div class="k">País</div><div class="v" id="modal-country"></div></div>
         <div class="detail-item"><div class="k">Teléfono</div><div class="v" id="modal-phone"></div></div>
         <div class="detail-item"><div class="k">Correo</div><div class="v" id="modal-email"></div></div>
         <div class="detail-item"><div class="k">Discord / ID de Juego</div><div class="v" id="modal-discord"></div></div>
         <div class="detail-item"><div class="k">Antecedentes penales</div><div class="v" id="modal-criminal"></div></div>
+      </div>
+
+      <h3 class="modal-section-title">Postulación</h3>
+      <div class="detail-grid">
         <div class="detail-item detail-full"><div class="k">¿Roleó antes en SAED (HiddenRP u otras versiones)?</div><div class="v" id="modal-previous-saed"></div></div>
         <div class="detail-item detail-full"><div class="k">Experiencia Previa</div><div class="v" id="modal-experience"></div></div>
         <div class="detail-item detail-full"><div class="k">Motivación</div><div class="v" id="modal-motivation"></div></div>
-        <div class="detail-item detail-full"><div class="k">Estado actual</div><div class="v" id="modal-status"></div></div>
         <div class="detail-item detail-full" id="modal-reviewed-wrap" style="display:none">
           <div class="k">Revisado por</div><div class="v" id="modal-reviewed"></div>
         </div>
       </div>
 
+      <h3 class="modal-section-title">Revisión del staff</h3>
       <label for="modal-notes">Notas internas</label>
       <textarea id="modal-notes" placeholder="Notas del staff sobre esta postulación..."></textarea>
 
@@ -87,6 +130,8 @@
       </div>
     </div>
   </div>
+
+  <div id="toast-container" class="toast-container"></div>
 
   <script src="js/admin.js"></script>
 </body>
