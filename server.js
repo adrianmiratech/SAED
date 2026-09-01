@@ -181,6 +181,10 @@ app.delete('/api/applications/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.listen(PORT, () => {
-  console.log(`SAED - Gestión de postulaciones corriendo en http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`SAED - Gestión de postulaciones corriendo en http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
