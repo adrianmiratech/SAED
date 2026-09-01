@@ -93,10 +93,14 @@ app.post('/api/applications', async (req, res) => {
     previousSaedExperience, (previousSaedDetails || '').trim() || null,
   );
 
-  notifyDiscord({
-    department, fullName, age: ageNum, country, phone, email, discordInfo, experience, motivation, criminalRecord,
-    previousSaedExperience, previousSaedDetails,
-  }).catch((err) => console.error('Error enviando a Discord:', err.message));
+  try {
+    await notifyDiscord({
+      department, fullName, age: ageNum, country, phone, email, discordInfo, experience, motivation, criminalRecord,
+      previousSaedExperience, previousSaedDetails,
+    });
+  } catch (err) {
+    console.error('Error enviando a Discord:', err.message);
+  }
 
   res.status(201).json({ ok: true, id: info.lastInsertRowid });
 });
