@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Postulaciones SAED - Admin</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><span class="badge">SAED</span> Panel de Postulaciones</div>
+    <div class="top-actions">
+      <span id="whoami" class="muted-link"></span>
+      <button id="logout-btn" class="btn-ghost btn-sm">Cerrar sesión</button>
+    </div>
+  </div>
+
+  <div class="container wide">
+    <div class="card">
+      <div class="toolbar">
+        <button class="btn dept-filter-btn active" data-department="">Todos los departamentos</button>
+        <button class="btn dept-filter-btn" data-department="sams">SAMS</button>
+        <button class="btn dept-filter-btn" data-department="bomberos">Bomberos</button>
+      </div>
+      <div class="toolbar">
+        <button class="btn filter-btn active" data-status="">Todas</button>
+        <button class="btn filter-btn" data-status="pendiente">Pendientes</button>
+        <button class="btn filter-btn" data-status="aprobado">Aprobadas</button>
+        <button class="btn filter-btn" data-status="rechazado">Rechazadas</button>
+        <span style="flex:1"></span>
+        <button id="refresh-btn" class="btn btn-ghost btn-sm">Actualizar</button>
+      </div>
+
+      <div id="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Departamento</th>
+              <th>Nombre</th>
+              <th>Edad</th>
+              <th>País</th>
+              <th>Teléfono</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+        <div id="empty" class="empty-state" style="display:none">No hay postulaciones en esta categoría.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-backdrop">
+    <div class="modal">
+      <h2 id="modal-name"></h2>
+      <p class="subtitle" id="modal-date"></p>
+
+      <div class="detail-grid">
+        <div class="detail-item"><div class="k">Departamento</div><div class="v" id="modal-department"></div></div>
+        <div class="detail-item"><div class="k">Edad</div><div class="v" id="modal-age"></div></div>
+        <div class="detail-item"><div class="k">País</div><div class="v" id="modal-country"></div></div>
+        <div class="detail-item"><div class="k">Teléfono</div><div class="v" id="modal-phone"></div></div>
+        <div class="detail-item"><div class="k">Correo</div><div class="v" id="modal-email"></div></div>
+        <div class="detail-item"><div class="k">Discord / ID de Juego</div><div class="v" id="modal-discord"></div></div>
+        <div class="detail-item"><div class="k">Antecedentes penales</div><div class="v" id="modal-criminal"></div></div>
+        <div class="detail-item detail-full"><div class="k">Experiencia Previa</div><div class="v" id="modal-experience"></div></div>
+        <div class="detail-item detail-full"><div class="k">Motivación</div><div class="v" id="modal-motivation"></div></div>
+        <div class="detail-item detail-full"><div class="k">Estado actual</div><div class="v" id="modal-status"></div></div>
+        <div class="detail-item detail-full" id="modal-reviewed-wrap" style="display:none">
+          <div class="k">Revisado por</div><div class="v" id="modal-reviewed"></div>
+        </div>
+      </div>
+
+      <label for="modal-notes">Notas internas</label>
+      <textarea id="modal-notes" placeholder="Notas del staff sobre esta postulación..."></textarea>
+
+      <div class="modal-actions">
+        <button class="btn btn-danger" data-action="rechazado">Rechazar</button>
+        <button class="btn btn-ghost" data-action="pendiente">Marcar pendiente</button>
+        <button class="btn btn-ok" data-action="aprobado">Aprobar</button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="modal-close">Cerrar</button>
+        <button class="btn btn-danger btn-sm" id="modal-delete">Eliminar postulación</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/admin.js"></script>
+</body>
+</html>

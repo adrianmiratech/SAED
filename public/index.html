@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SAED — San Andreas Emergency Departments</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <nav class="site-nav">
+    <div class="brand">
+      <span class="brand-mark">✚</span>
+      <span class="brand-text">
+        <span class="name">SAED</span>
+        <span class="tagline">San Andreas Emergency Departments</span>
+      </span>
+    </div>
+    <div class="nav-links">
+      <a href="#inicio">Inicio</a>
+      <a href="#departamentos">Departamentos</a>
+      <a href="#requisitos">Requisitos</a>
+      <span class="nav-divider"></span>
+      <a class="btn btn-primary btn-sm" href="#postular">Postularme</a>
+      <a href="/login.html">Personal</a>
+    </div>
+  </nav>
+
+  <header id="inicio" class="hero">
+    <span class="eyebrow">San Andreas Emergency Departments</span>
+    <h1>Servimos a San Andreas en cada emergencia</h1>
+    <p class="lead">
+      El SAED coordina la gestión de los servicios de emergencia del estado: San Andreas Medical Services (SAMS)
+      y el Departamento de Bomberos. Postulate al departamento que más te represente y sumate a la comunidad.
+    </p>
+    <div class="hero-actions">
+      <a href="#postular" class="btn btn-primary">Quiero postularme</a>
+      <a href="#departamentos" class="btn btn-ghost">Conocer los departamentos</a>
+    </div>
+    <svg class="pulse-line" viewBox="0 0 640 60" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M0 30 H220 L245 8 L268 52 L290 20 L305 30 H420 L440 12 L458 48 L475 30 H640"
+            stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+    <div class="hero-stats">
+      <div>
+        <div class="stat-num">24/7</div>
+        <div class="stat-label">Respuesta a emergencias</div>
+      </div>
+      <div>
+        <div class="stat-num">2</div>
+        <div class="stat-label">Departamentos activos</div>
+      </div>
+      <div>
+        <div class="stat-num">+1</div>
+        <div class="stat-label">Comunidad en crecimiento</div>
+      </div>
+    </div>
+  </header>
+
+  <section id="departamentos" class="section">
+    <div class="section-header">
+      <span class="eyebrow">Elegí tu vocación</span>
+      <h2>Nuestros departamentos</h2>
+      <p>El SAED gestiona la incorporación de personal para los dos servicios de emergencia del estado.</p>
+    </div>
+    <div class="dept-grid">
+      <div class="dept-card dept-sams">
+        <div class="dept-icon">🚑</div>
+        <h3>SAMS</h3>
+        <p class="dept-sub">San Andreas Medical Services</p>
+        <p>Atención médica de emergencia, primeros auxilios y traslados de pacientes a los centros de salud del estado.</p>
+        <a href="#postular" class="btn btn-primary btn-sm dept-apply" data-department="sams">Postularme a SAMS</a>
+      </div>
+      <div class="dept-card dept-bomberos">
+        <div class="dept-icon">🚒</div>
+        <h3>Bomberos</h3>
+        <p class="dept-sub">Departamento de Bomberos</p>
+        <p>Extinción de incendios, rescate en accidentes y respuesta ante emergencias que ponen en riesgo a la comunidad.</p>
+        <a href="#postular" class="btn btn-primary btn-sm dept-apply" data-department="bomberos">Postularme a Bomberos</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="requisitos" class="section">
+    <div class="section-header">
+      <span class="eyebrow">Antes de postular</span>
+      <h2>Requisitos para postular</h2>
+      <p>Antes de enviar tu postulación a cualquiera de los departamentos, asegurate de cumplir con lo siguiente.</p>
+    </div>
+    <ul class="requisitos-list">
+      <li>Mayoría de edad o autorización correspondiente</li>
+      <li>Buena predisposición para el roleplay y el trabajo en equipo</li>
+      <li>Sin antecedentes penales graves</li>
+      <li>Disponibilidad horaria mínima acordada con la organización</li>
+      <li>Actitud responsable y compromiso con la comunidad</li>
+      <li>Ganas de aprender y crecer dentro del SAED</li>
+    </ul>
+  </section>
+
+  <section id="postular" class="section postular-section">
+    <div class="section-header">
+      <span class="eyebrow">Sumate al equipo</span>
+      <h2>Formulario de Postulación</h2>
+      <p>Elegí el departamento y completá el formulario. Toda la información será revisada por el equipo de reclutamiento del SAED.</p>
+    </div>
+
+    <div class="card">
+      <form id="app-form">
+        <label for="department">Departamento *</label>
+        <select id="department" required>
+          <option value="" disabled selected>Elegí un departamento</option>
+          <option value="sams">SAMS — San Andreas Medical Services</option>
+          <option value="bomberos">Bomberos — Departamento de Bomberos</option>
+        </select>
+
+        <div class="row">
+          <div>
+            <label for="fullName">Nombre y Apellido *</label>
+            <input type="text" id="fullName" required />
+          </div>
+          <div>
+            <label for="age">Edad *</label>
+            <input type="number" id="age" min="1" max="120" required />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="country">País de Nacimiento *</label>
+            <input type="text" id="country" required />
+          </div>
+          <div>
+            <label for="phone">Teléfono *</label>
+            <input type="tel" id="phone" required />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="email">Correo Electrónico <span class="hint">(opcional)</span></label>
+            <input type="email" id="email" />
+          </div>
+          <div>
+            <label for="discordInfo">Discord / ID de Juego <span class="hint">(opcional)</span></label>
+            <input type="text" id="discordInfo" placeholder="Usuario#0000 · G21ZH01K" />
+          </div>
+        </div>
+
+        <label for="experience">Experiencia Previa *</label>
+        <textarea id="experience" required placeholder="Contanos tu experiencia relacionada (primeros auxilios, bomberos, roleplay de emergencias, etc.)"></textarea>
+
+        <label for="motivation">Motivación *</label>
+        <textarea id="motivation" required placeholder="¿Por qué querés unirte a este departamento?"></textarea>
+
+        <label>¿Tiene antecedentes penales? *</label>
+        <div class="radio-group">
+          <label><input type="radio" name="criminalRecord" value="No" required /> No</label>
+          <label><input type="radio" name="criminalRecord" value="Sí" /> Sí</label>
+        </div>
+
+        <div class="submit-row">
+          <button type="submit" class="btn-primary">Enviar postulación</button>
+        </div>
+
+        <div id="message" class="message"></div>
+      </form>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <div class="brand">
+      <span class="brand-mark">✚</span>
+      <span class="brand-text">
+        <span class="name">SAED</span>
+        <span class="tagline">San Andreas Emergency Departments</span>
+      </span>
+    </div>
+    <p>Gestión de postulaciones de SAMS y Bomberos · Servidor de roleplay FiveM</p>
+    <p>¿Consultas? Escribinos por Discord o usá el <a href="#postular">formulario de postulación</a>. Acceso del personal: <a href="/login.html">Personal</a>.</p>
+  </footer>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

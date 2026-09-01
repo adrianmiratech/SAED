@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login staff SAED</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="card login-card">
+      <h1>Panel de Staff</h1>
+      <p class="subtitle">SAED — Gestión de postulaciones de SAMS y Bomberos</p>
+
+      <form id="login-form">
+        <label for="username">Usuario</label>
+        <input type="text" id="username" required autofocus />
+
+        <label for="password">Contraseña</label>
+        <input type="password" id="password" required />
+
+        <div class="submit-row">
+          <button type="submit" class="btn-primary">Ingresar</button>
+        </div>
+
+        <div id="message" class="message"></div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/login.js"></script>
+</body>
+</html>
