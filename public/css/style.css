@@ -772,7 +772,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 }
 .dept-card:hover { transform: translateY(-3px); }
 
-.dept-card.dept-bomberos { border-top-color: var(--cross); }
+.dept-card.dept-safd { border-top-color: var(--cross); }
 
 .dept-icon {
   font-size: 30px;
@@ -802,7 +802,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   margin: 0 0 12px;
 }
 
-.dept-bomberos .dept-sub { color: var(--cross); }
+.dept-safd .dept-sub { color: var(--cross); }
 
 .dept-card p:not(.dept-sub) {
   color: var(--text-muted);
@@ -821,7 +821,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   color: var(--accent);
 }
 
-.dept-badge.dept-bomberos { background: var(--cross-soft); color: var(--cross); }
+.dept-badge.dept-safd { background: var(--cross-soft); color: var(--cross); }
 
 .postular-section {
   background:

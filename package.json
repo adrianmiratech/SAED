@@ -1,7 +1,7 @@
 {
   "name": "sams-postulaciones",
   "version": "1.0.0",
-  "description": "Gestion de postulaciones a los departamentos SAMS y Bomberos del SAED",
+  "description": "Gestion de postulaciones a los departamentos SAMS y SAFD del SAED",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

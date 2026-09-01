@@ -29,8 +29,8 @@ function requireAuth(req, res, next) {
 }
 
 const VALID_STATUSES = ['pendiente', 'aprobado', 'rechazado'];
-const VALID_DEPARTMENTS = ['sams', 'bomberos'];
-const DEPARTMENT_LABELS = { sams: 'SAMS', bomberos: 'Bomberos' };
+const VALID_DEPARTMENTS = ['sams', 'safd'];
+const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 
 // ---------- Auth ----------
 
@@ -113,7 +113,7 @@ async function notifyDiscord(app_) {
   const embed = {
     title: `SAED — Postulación a ${deptLabel}`,
     description: `Nueva postulación recibida a través de la web de gestión del SAED para el departamento de ${deptLabel}.`,
-    color: app_.department === 'bomberos' ? 0xe05a2b : 0x2b6cb0,
+    color: app_.department === 'safd' ? 0xe05a2b : 0x2b6cb0,
     fields: [
       { name: 'Departamento', value: deptLabel, inline: true },
       { name: 'Nombre y Apellido', value: app_.fullName, inline: true },

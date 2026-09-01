@@ -48,6 +48,9 @@ if (!columns.some((c) => c.name === 'previous_saed_details')) {
   db.exec('ALTER TABLE applications ADD COLUMN previous_saed_details TEXT');
 }
 
+// Renombra el departamento de bomberos a su clave actual (SAFD).
+db.exec("UPDATE applications SET department = 'safd' WHERE department = 'bomberos'");
+
 // En Vercel /tmp se resetea en cada arranque en frío de la función, así que
 // el usuario admin se re-siembra desde variables de entorno en cada cold start.
 if (process.env.VERCEL && process.env.ADMIN_USER && process.env.ADMIN_PASSWORD) {

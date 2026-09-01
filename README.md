@@ -1,9 +1,9 @@
 # SAED - Gestión de Postulaciones
 
 Web para gestionar las postulaciones a los departamentos de emergencia de San Andreas, coordinados por el SAED
-(San Andreas Emergency Departments): **SAMS** (San Andreas Medical Services) y **Bomberos**.
+(San Andreas Emergency Departments): **SAMS** (San Andreas Medical Services) y **SAFD** (San Andreas Fire Department).
 
-- `/` — formulario público de postulación, con selección de departamento (SAMS o Bomberos).
+- `/` — formulario público de postulación, con selección de departamento (SAMS o SAFD).
 - `/login.html` — login del staff.
 - `/admin.html` — panel para ver, filtrar (por departamento y por estado), aprobar/rechazar y anotar postulaciones (requiere login).
 

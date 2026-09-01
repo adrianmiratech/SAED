@@ -4,7 +4,7 @@ let currentDepartmentFilter = '';
 let currentSearch = '';
 let currentId = null;
 
-const DEPARTMENT_LABELS = { sams: 'SAMS', bomberos: 'Bomberos' };
+const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 
 const tableBody = document.getElementById('table-body');
 const emptyEl = document.getElementById('empty');
