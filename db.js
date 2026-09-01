@@ -40,4 +40,15 @@ if (!columns.some((c) => c.name === 'department')) {
   db.exec("ALTER TABLE applications ADD COLUMN department TEXT NOT NULL DEFAULT 'sams'");
 }
 
+// En Vercel /tmp se resetea en cada arranque en frío de la función, así que
+// el usuario admin se re-siembra desde variables de entorno en cada cold start.
+if (process.env.VERCEL && process.env.ADMIN_USER && process.env.ADMIN_PASSWORD) {
+  const bcrypt = require('bcryptjs');
+  const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD, 10);
+  db.prepare(`
+    INSERT INTO admins (username, password_hash) VALUES (?, ?)
+    ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash
+  `).run(process.env.ADMIN_USER, hash);
+}
+
 module.exports = db;
