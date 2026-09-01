@@ -1,25 +1,31 @@
-# app = "sams-postulaciones"   # descomenta y poné el nombre que elijas (debe ser único en Fly.io)
-primary_region = "eze" # Buenos Aires. Alternativas: "gru" (São Paulo), "mia" (Miami)
+# fly.toml app configuration file generated for saed-6uselq on 2026-09-01T22:07:27Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'saed-6uselq'
+primary_region = 'ams'
 
 [build]
 
 [env]
-  PORT = "3000"
-  DB_PATH = "/data/data.sqlite"
+  DB_PATH = '/data/data.sqlite'
+  PORT = '3000'
 
 [[mounts]]
-  source = "sams_data"
-  destination = "/data"
+  source = 'sams_data'
+  destination = '/data'
 
 [http_service]
-  internal_port = 3000
+  internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
+  processes = ['app']
 
 [[vm]]
-  memory = "256mb"
-  cpu_kind = "shared"
+  memory = '256mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
