@@ -71,7 +71,7 @@ app.post('/api/applications', async (req, res) => {
     return res.status(400).json({ error: 'Departamento inválido' });
   }
 
-  if (!fullName || !age || !country || !phone || !experience || !motivation || !criminalRecord || !previousSaedExperience) {
+  if (!fullName || !age || !country || !phone || !discordInfo || !experience || !motivation || !criminalRecord || !previousSaedExperience) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
 
@@ -88,7 +88,7 @@ app.post('/api/applications', async (req, res) => {
   `);
   const info = insert.run(
     department, fullName.trim(), ageNum, country.trim(), phone.trim(),
-    (email || '').trim() || null, (discordInfo || '').trim() || null,
+    (email || '').trim() || null, discordInfo.trim(),
     experience.trim(), motivation.trim(), criminalRecord,
     previousSaedExperience, (previousSaedDetails || '').trim() || null,
   );
@@ -121,7 +121,7 @@ async function notifyDiscord(app_) {
       { name: 'País de Nacimiento', value: app_.country, inline: true },
       { name: 'Teléfono', value: app_.phone, inline: true },
       { name: 'Correo Electrónico', value: app_.email || 'N/A', inline: true },
-      ...(app_.discordInfo ? [{ name: 'Discord / ID de Juego', value: app_.discordInfo, inline: true }] : []),
+      { name: 'Usuario de Discord', value: app_.discordInfo, inline: true },
       { name: 'Experiencia Previa', value: app_.experience.slice(0, 1024) },
       { name: 'Motivación', value: app_.motivation.slice(0, 1024) },
       { name: '¿Tiene antecedentes penales?', value: app_.criminalRecord },
