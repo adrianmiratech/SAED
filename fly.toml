@@ -1,5 +1,5 @@
-# app = "sams-postulaciones"   # descomenta y poné el nombre que elijas (debe ser único en Fly.io)
-primary_region = "eze" # Buenos Aires. Alternativas: "gru" (São Paulo), "mia" (Miami)
+app = "saed-6uselq"
+primary_region = "ams" # Amsterdam: región donde ya existe el volumen persistente "sams_data"
 
 [build]
 
