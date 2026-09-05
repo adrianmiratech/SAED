@@ -59,9 +59,11 @@ async function checkSession() {
   }
   scopedDepartment = data.department || null;
   currentUsername = data.username;
-  whoamiEl.textContent = scopedDepartment
-    ? `${data.username} · ${departmentLabel(scopedDepartment)}`
-    : data.username;
+  whoamiEl.textContent = data.username;
+  document.getElementById('whoami-avatar').textContent = initials(data.username);
+  document.getElementById('whoami-scope').textContent = scopedDepartment
+    ? departmentLabel(scopedDepartment)
+    : 'Todos los departamentos';
 
   if (scopedDepartment) {
     // Staff restringido a un departamento: no tiene sentido mostrar el

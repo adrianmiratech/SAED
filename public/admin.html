@@ -19,8 +19,15 @@
     <div class="top-actions">
       <a href="/" class="muted-link">Ver sitio público</a>
       <button id="manage-staff-btn" class="btn-ghost btn-sm" style="display:none">Gestionar staff</button>
-      <span id="whoami" class="muted-link"></span>
-      <button id="logout-btn" class="btn-ghost btn-sm">Cerrar sesión</button>
+      <span class="top-divider"></span>
+      <div class="user-chip">
+        <span class="user-chip-avatar" id="whoami-avatar"></span>
+        <span class="user-chip-info">
+          <span class="user-chip-name" id="whoami"></span>
+          <span class="user-chip-scope" id="whoami-scope"></span>
+        </span>
+      </div>
+      <button id="logout-btn" class="btn-logout btn-sm">Cerrar sesión</button>
     </div>
   </div>
 
