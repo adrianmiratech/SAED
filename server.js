@@ -8,6 +8,7 @@ const db = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+const DISCORD_PAYROLL_WEBHOOK_URL = process.env.DISCORD_PAYROLL_WEBHOOK_URL;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -196,6 +197,35 @@ async function notifyDiscord(app_) {
   };
 
   await fetch(DISCORD_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ embeds: [embed] }),
+  });
+}
+
+async function notifyPayrollPaid(p) {
+  if (!DISCORD_PAYROLL_WEBHOOK_URL) return;
+
+  const deptLabel = DEPARTMENT_LABELS[p.department] || p.department;
+
+  const embed = {
+    title: `SAED — Nómina pagada (${deptLabel})`,
+    description: `Se registró el pago de nómina de un integrante del departamento de ${deptLabel}.`,
+    color: p.department === 'safd' ? 0xe05a2b : 0x2b6cb0,
+    fields: [
+      { name: 'Departamento', value: deptLabel, inline: true },
+      { name: 'Empleado', value: p.employeeName, inline: true },
+      { name: 'Rango', value: p.rankName, inline: true },
+      { name: 'Horas trabajadas', value: String(p.hours), inline: true },
+      { name: 'Tarifa por hora', value: `$${Number(p.hourlyRate).toFixed(2)}`, inline: true },
+      { name: 'Total pagado', value: `$${Number(p.total).toFixed(2)}`, inline: true },
+      ...(p.periodLabel ? [{ name: 'Período', value: p.periodLabel, inline: true }] : []),
+      { name: 'Pagado por', value: p.paidBy },
+    ],
+    timestamp: p.paidAt,
+  };
+
+  await fetch(DISCORD_PAYROLL_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ embeds: [embed] }),
@@ -461,18 +491,40 @@ app.post('/api/payroll', requireAuth, (req, res) => {
   res.status(201).json({ id: info.lastInsertRowid, total });
 });
 
-app.patch('/api/payroll/:id', requireAuth, (req, res) => {
+app.patch('/api/payroll/:id', requireAuth, async (req, res) => {
   const row = db.prepare('SELECT * FROM payroll WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
   const employee = getEmployeeWithAccess(req, res, row.employee_id);
   if (!employee) return;
 
   const { paid } = req.body || {};
+  const paidAt = paid ? new Date().toISOString() : null;
   db.prepare(`
     UPDATE payroll SET paid = ?, paid_at = ? WHERE id = ?
-  `).run(paid ? 1 : 0, paid ? new Date().toISOString() : null, req.params.id);
+  `).run(paid ? 1 : 0, paidAt, req.params.id);
 
   res.json({ ok: true });
+
+  // El pago recién se notifica al pasar de pendiente a pagada (no en cada
+  // reconfirmación ni al volver a marcarla pendiente).
+  if (paid && !row.paid) {
+    const rank = db.prepare('SELECT * FROM ranks WHERE id = ?').get(employee.rank_id);
+    try {
+      await notifyPayrollPaid({
+        department: employee.department,
+        employeeName: employee.full_name,
+        rankName: rank ? rank.name : 'Sin rango',
+        hours: row.hours,
+        hourlyRate: row.hourly_rate,
+        total: row.total_amount,
+        periodLabel: row.period_label,
+        paidBy: req.session.adminUser,
+        paidAt,
+      });
+    } catch (err) {
+      console.error('Error enviando notificación de nómina a Discord:', err.message);
+    }
+  }
 });
 
 app.delete('/api/payroll/:id', requireAuth, (req, res) => {
