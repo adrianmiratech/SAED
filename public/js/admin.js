@@ -388,7 +388,10 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     const tab = btn.dataset.tab;
     tabPostulaciones.style.display = tab === 'postulaciones' ? 'block' : 'none';
     tabPersonal.style.display = tab === 'personal' ? 'block' : 'none';
-    if (tab === 'personal') loadEmployees();
+    if (tab === 'personal') {
+      if (ranks.length === 0) loadRanks();
+      loadEmployees();
+    }
   });
 });
 
@@ -481,7 +484,9 @@ function openNewEmployeeModal() {
   employeeActiveField.style.display = 'none';
   employeePayrollSection.style.display = 'none';
 
-  const initialDept = scopedDepartment || employeeDepartmentSelect.value || 'sams';
+  // Si hay un filtro de departamento activo, el nuevo empleado arranca en
+  // ese departamento para que aparezca en la lista apenas se crea.
+  const initialDept = scopedDepartment || currentPersonalDeptFilter || 'sams';
   employeeDepartmentSelect.value = initialDept;
   populateRankSelect(initialDept);
 
@@ -495,7 +500,7 @@ async function openEmployeeModal(id) {
   resetEmployeeForm();
 
   document.getElementById('employee-modal-name').textContent = e.full_name;
-  document.getElementById('employee-modal-sub').textContent = e.discord_info ? `Discord: ${e.discord_info}` : '';
+  document.getElementById('employee-modal-sub').textContent = e.discord_info ? `ID de Discord: ${e.discord_info}` : '';
   document.getElementById('employee-modal-department').innerHTML = `<span class="dept-badge dept-${e.department}">${departmentLabel(e.department)}</span>`;
   document.getElementById('employee-modal-active').innerHTML = `<span class="status-pill ${e.active ? 'status-aprobado' : 'status-rechazado'}">${e.active ? 'Activo' : 'Inactivo'}</span>`;
   employeeFormSubmit.textContent = 'Guardar cambios';
@@ -547,6 +552,16 @@ employeeForm.addEventListener('submit', async (e) => {
     if (!res.ok) throw new Error(data.error || 'No se pudo guardar el empleado');
 
     showToast(isEdit ? 'Empleado actualizado.' : 'Empleado creado.');
+
+    if (!isEdit && !scopedDepartment && currentPersonalDeptFilter && currentPersonalDeptFilter !== department) {
+      // El empleado se creó en un departamento distinto al filtro activo:
+      // mostramos "Todos" para que aparezca sin que parezca que se perdió.
+      currentPersonalDeptFilter = '';
+      document.querySelectorAll('.personal-dept-filter-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.department === '');
+      });
+    }
+
     await loadEmployees();
     if (isEdit) {
       await openEmployeeModal(currentEmployeeId);
