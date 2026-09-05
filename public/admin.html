@@ -90,6 +90,25 @@
     </div>
 
     <div id="tab-personal" style="display:none">
+      <div class="stats-grid" id="personal-stats-grid">
+        <div class="stat-card">
+          <div class="stat-value" id="pstat-total">–</div>
+          <div class="stat-label">Empleados</div>
+        </div>
+        <div class="stat-card stat-aprobado">
+          <div class="stat-value" id="pstat-active">–</div>
+          <div class="stat-label">Activos</div>
+        </div>
+        <div class="stat-card stat-rechazado">
+          <div class="stat-value" id="pstat-inactive">–</div>
+          <div class="stat-label">Inactivos</div>
+        </div>
+        <div class="stat-card stat-pendiente">
+          <div class="stat-value" id="pstat-pending">–</div>
+          <div class="stat-label">Nómina pendiente</div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="toolbar" id="personal-dept-filter-row">
           <button class="btn personal-dept-filter-btn active" data-department="">Todos los departamentos</button>
@@ -102,24 +121,10 @@
           <button id="new-employee-btn" class="btn-primary btn-sm">+ Nuevo empleado</button>
         </div>
 
-        <div id="employees-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Departamento</th>
-                <th>Nombre</th>
-                <th>Rango</th>
-                <th>Tarifa/hora</th>
-                <th>Estado</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="employees-table-body"></tbody>
-          </table>
-          <div id="employees-empty" class="empty-state" style="display:none">
-            <div class="empty-icon">👥</div>
-            <p>No hay empleados cargados en esta categoría.</p>
-          </div>
+        <div id="employees-columns"></div>
+        <div id="employees-empty" class="empty-state" style="display:none">
+          <div class="empty-icon">👥</div>
+          <p>No hay empleados cargados en esta categoría.</p>
         </div>
       </div>
     </div>
@@ -140,8 +145,16 @@
 
       <h3 class="modal-section-title">Datos del empleado</h3>
       <form id="employee-form">
-        <label for="employee-fullname">Nombre completo</label>
-        <input type="text" id="employee-fullname" required autocomplete="off" />
+        <div class="row">
+          <div>
+            <label for="employee-fullname">Nombre completo</label>
+            <input type="text" id="employee-fullname" required autocomplete="off" />
+          </div>
+          <div>
+            <label for="employee-phone">Teléfono</label>
+            <input type="tel" id="employee-phone" required autocomplete="off" placeholder="Ej: +54 9 11 1234-5678" />
+          </div>
+        </div>
 
         <label for="employee-discord">ID de Discord <span class="hint">(el numérico, no el usuario)</span></label>
         <input type="text" id="employee-discord" autocomplete="off" placeholder="Ej: 123456789012345678" />

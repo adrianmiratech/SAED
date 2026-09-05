@@ -45,6 +45,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS employees (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     full_name TEXT NOT NULL,
+    phone TEXT,
     discord_info TEXT,
     department TEXT NOT NULL,
     rank_id INTEGER NOT NULL REFERENCES ranks(id),
@@ -131,6 +132,12 @@ for (const col of ['phone', 'email']) {
 const adminColumns = db.prepare('PRAGMA table_info(admins)').all();
 if (!adminColumns.some((c) => c.name === 'department')) {
   db.exec('ALTER TABLE admins ADD COLUMN department TEXT');
+}
+
+// Migración: agrega el teléfono a empleados si la tabla ya existía sin él.
+const employeeColumns = db.prepare('PRAGMA table_info(employees)').all();
+if (!employeeColumns.some((c) => c.name === 'phone')) {
+  db.exec('ALTER TABLE employees ADD COLUMN phone TEXT');
 }
 
 // En Vercel /tmp se resetea en cada arranque en frío de la función, así que

@@ -31,7 +31,7 @@ const tabPersonal = document.getElementById('tab-personal');
 const personalDeptFilterRow = document.getElementById('personal-dept-filter-row');
 const ratesBtn = document.getElementById('rates-btn');
 const newEmployeeBtn = document.getElementById('new-employee-btn');
-const employeesTableBody = document.getElementById('employees-table-body');
+const employeesColumns = document.getElementById('employees-columns');
 const employeesEmpty = document.getElementById('employees-empty');
 const employeeModalBackdrop = document.getElementById('employee-modal-backdrop');
 const employeeForm = document.getElementById('employee-form');
@@ -426,6 +426,23 @@ employeeDepartmentSelect.addEventListener('change', () => {
   populateRankSelect(employeeDepartmentSelect.value);
 });
 
+const RANK_TIERS = [
+  { min: 8, max: 9, label: 'Comisionado SAED', solid: '#a78bfa', soft: 'rgba(167,139,250,0.18)' },
+  { min: 6, max: 7, label: 'Jefatura SAED', solid: '#6366f1', soft: 'rgba(99,102,241,0.18)' },
+  { min: 4, max: 5, label: 'Rango medio', solid: '#14b8a6', soft: 'rgba(20,184,166,0.18)' },
+  { min: 2, max: 3, label: 'Rango bajo', solid: '#f59e0b', soft: 'rgba(245,158,11,0.18)' },
+  { min: 1, max: 1, label: 'Academia', solid: '#94a3b8', soft: 'rgba(148,163,184,0.18)' },
+  { min: 0, max: 0, label: 'Voluntario', solid: '#eab308', soft: 'rgba(234,179,8,0.18)' },
+];
+
+function tierForLevel(level) {
+  return RANK_TIERS.find((t) => level >= t.min && level <= t.max) || RANK_TIERS[RANK_TIERS.length - 1];
+}
+
+function initials(name) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+}
+
 async function loadEmployees() {
   const params = new URLSearchParams();
   if (currentPersonalDeptFilter) params.set('department', currentPersonalDeptFilter);
@@ -436,31 +453,82 @@ async function loadEmployees() {
     return;
   }
   employees = await res.json();
-  renderEmployeesTable();
+  renderEmployeesBoard();
+  renderPersonalStats();
 }
 
-function renderEmployeesTable() {
-  employeesTableBody.innerHTML = '';
+function renderPersonalStats() {
+  document.getElementById('pstat-total').textContent = employees.length;
+  document.getElementById('pstat-active').textContent = employees.filter((e) => e.active).length;
+  document.getElementById('pstat-inactive').textContent = employees.filter((e) => !e.active).length;
+
+  const params = new URLSearchParams({ paid: '0' });
+  if (currentPersonalDeptFilter) params.set('department', currentPersonalDeptFilter);
+  fetch(`/api/payroll?${params.toString()}`)
+    .then((res) => (res.ok ? res.json() : []))
+    .then((rows) => {
+      const total = rows.reduce((sum, p) => sum + Number(p.total_amount), 0);
+      document.getElementById('pstat-pending').textContent = rows.length
+        ? `${rows.length} · $${total.toFixed(2)}`
+        : '0';
+    });
+}
+
+function employeeCardHtml(e) {
+  const tier = tierForLevel(e.rank_level);
+  return `
+    <div class="employee-card${e.active ? '' : ' is-inactive'}" style="--tier-color:${tier.solid}" data-employee-id="${e.id}">
+      <div class="employee-card-top">
+        <div class="employee-avatar">${escapeHtml(initials(e.full_name))}</div>
+        <div class="employee-card-name-wrap">
+          <div class="employee-card-name">${escapeHtml(e.full_name)}</div>
+          <span class="rank-badge" style="background:${tier.soft};color:${tier.solid}">Nv.${e.rank_level} · ${escapeHtml(e.rank_name)}</span>
+        </div>
+        <span class="employee-status-dot${e.active ? '' : ' is-inactive'}" title="${e.active ? 'Activo' : 'Inactivo'}"></span>
+      </div>
+      <div class="employee-card-meta">
+        <span>☎ ${escapeHtml(e.phone || 'Sin teléfono')}</span>
+        <span>#${escapeHtml(e.discord_info || 'Sin Discord')}</span>
+        <span>$${Number(e.rank_hourly_rate).toFixed(2)}/h</span>
+      </div>
+    </div>
+  `;
+}
+
+function employeeGroupHtml(dept) {
+  const list = employees.filter((e) => e.department === dept);
+  return `
+    <div class="employee-group">
+      <div class="employee-group-header">
+        <span class="dept-badge dept-${dept}">${departmentLabel(dept)}</span>
+        <span class="employee-group-count">${list.length} empleado${list.length === 1 ? '' : 's'}</span>
+      </div>
+      ${list.length === 0
+        ? '<div class="staff-empty">Sin empleados en este departamento.</div>'
+        : `<div class="employee-grid">${list.map(employeeCardHtml).join('')}</div>`}
+    </div>
+  `;
+}
+
+function renderEmployeesBoard() {
   if (employees.length === 0) {
+    employeesColumns.innerHTML = '';
+    employeesColumns.className = '';
     employeesEmpty.style.display = 'block';
     return;
   }
   employeesEmpty.style.display = 'none';
 
-  for (const e of employees) {
-    const tr = document.createElement('tr');
-    tr.className = 'row-link';
-    tr.innerHTML = `
-      <td><span class="dept-badge dept-${e.department}">${departmentLabel(e.department)}</span></td>
-      <td>${escapeHtml(e.full_name)}</td>
-      <td>${e.rank_level} — ${escapeHtml(e.rank_name)}</td>
-      <td>$${Number(e.rank_hourly_rate).toFixed(2)}</td>
-      <td><span class="status-pill ${e.active ? 'status-aprobado' : 'status-rechazado'}">${e.active ? 'Activo' : 'Inactivo'}</span></td>
-      <td class="row-chevron">›</td>
-    `;
-    tr.addEventListener('click', () => openEmployeeModal(e.id));
-    employeesTableBody.appendChild(tr);
-  }
+  const groups = scopedDepartment
+    ? [scopedDepartment]
+    : (currentPersonalDeptFilter ? [currentPersonalDeptFilter] : ['sams', 'safd']);
+
+  employeesColumns.className = groups.length === 2 ? 'employees-columns two-col' : 'employees-columns';
+  employeesColumns.innerHTML = groups.map(employeeGroupHtml).join('');
+
+  employeesColumns.querySelectorAll('[data-employee-id]').forEach((card) => {
+    card.addEventListener('click', () => openEmployeeModal(Number(card.dataset.employeeId)));
+  });
 }
 
 function resetEmployeeForm() {
@@ -483,6 +551,7 @@ function openNewEmployeeModal() {
   employeeDeleteBtn.style.display = 'none';
   employeeActiveField.style.display = 'none';
   employeePayrollSection.style.display = 'none';
+  employeeDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
 
   // Si hay un filtro de departamento activo, el nuevo empleado arranca en
   // ese departamento para que aparezca en la lista apenas se crea.
@@ -500,15 +569,20 @@ async function openEmployeeModal(id) {
   resetEmployeeForm();
 
   document.getElementById('employee-modal-name').textContent = e.full_name;
-  document.getElementById('employee-modal-sub').textContent = e.discord_info ? `ID de Discord: ${e.discord_info}` : '';
+  document.getElementById('employee-modal-sub').textContent = [
+    e.phone ? `☎ ${e.phone}` : null,
+    e.discord_info ? `ID de Discord: ${e.discord_info}` : null,
+  ].filter(Boolean).join(' · ');
   document.getElementById('employee-modal-department').innerHTML = `<span class="dept-badge dept-${e.department}">${departmentLabel(e.department)}</span>`;
   document.getElementById('employee-modal-active').innerHTML = `<span class="status-pill ${e.active ? 'status-aprobado' : 'status-rechazado'}">${e.active ? 'Activo' : 'Inactivo'}</span>`;
   employeeFormSubmit.textContent = 'Guardar cambios';
   employeeDeleteBtn.style.display = 'inline-flex';
   employeeActiveField.style.display = 'flex';
   employeePayrollSection.style.display = 'block';
+  employeeDepartmentField.style.display = 'none';
 
   document.getElementById('employee-fullname').value = e.full_name;
+  document.getElementById('employee-phone').value = e.phone || '';
   document.getElementById('employee-discord').value = e.discord_info || '';
   employeeActiveCheckbox.checked = !!e.active;
   populateRankSelect(e.department, e.rank_id);
@@ -528,6 +602,7 @@ employeeForm.addEventListener('submit', async (e) => {
   employeeMessage.textContent = '';
 
   const fullName = document.getElementById('employee-fullname').value.trim();
+  const phone = document.getElementById('employee-phone').value.trim();
   const discordInfo = document.getElementById('employee-discord').value.trim();
   const rankId = Number(employeeRankSelect.value);
   const department = scopedDepartment || employeeDepartmentSelect.value;
@@ -540,8 +615,8 @@ employeeForm.addEventListener('submit', async (e) => {
     const url = isEdit ? `/api/employees/${currentEmployeeId}` : '/api/employees';
     const method = isEdit ? 'PATCH' : 'POST';
     const body = isEdit
-      ? { fullName, discordInfo, rankId, active: employeeActiveCheckbox.checked }
-      : { fullName, discordInfo, rankId, department };
+      ? { fullName, phone, discordInfo, rankId, active: employeeActiveCheckbox.checked }
+      : { fullName, phone, discordInfo, rankId, department };
 
     const res = await fetch(url, {
       method,

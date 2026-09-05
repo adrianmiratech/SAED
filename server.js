@@ -367,11 +367,11 @@ function validateRankForDepartment(rankId, department) {
 }
 
 app.post('/api/employees', requireAuth, (req, res) => {
-  const { fullName, discordInfo, rankId } = req.body || {};
+  const { fullName, phone, discordInfo, rankId } = req.body || {};
   const scopedDept = req.session.adminDepartment;
   const department = scopedDept || req.body?.department;
 
-  if (!fullName || !department || !rankId) {
+  if (!fullName || !phone || !department || !rankId) {
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
   }
   if (!VALID_DEPARTMENTS.includes(department)) {
@@ -383,9 +383,9 @@ app.post('/api/employees', requireAuth, (req, res) => {
   }
 
   const info = db.prepare(`
-    INSERT INTO employees (full_name, discord_info, department, rank_id, created_by)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(fullName.trim(), (discordInfo || '').trim() || null, department, rank.id, req.session.adminUser);
+    INSERT INTO employees (full_name, phone, discord_info, department, rank_id, created_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(fullName.trim(), phone.trim(), (discordInfo || '').trim() || null, department, rank.id, req.session.adminUser);
 
   res.status(201).json({ id: info.lastInsertRowid });
 });
@@ -395,7 +395,7 @@ app.patch('/api/employees/:id', requireAuth, (req, res) => {
   if (!row) return res.status(404).json({ error: 'No encontrado' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
-  const { fullName, discordInfo, rankId, active } = req.body || {};
+  const { fullName, phone, discordInfo, rankId, active } = req.body || {};
   let rank_id = row.rank_id;
   if (rankId !== undefined) {
     const rank = validateRankForDepartment(rankId, row.department);
@@ -404,10 +404,11 @@ app.patch('/api/employees/:id', requireAuth, (req, res) => {
   }
 
   db.prepare(`
-    UPDATE employees SET full_name = ?, discord_info = ?, rank_id = ?, active = ?
+    UPDATE employees SET full_name = ?, phone = ?, discord_info = ?, rank_id = ?, active = ?
     WHERE id = ?
   `).run(
     fullName !== undefined ? fullName.trim() : row.full_name,
+    phone !== undefined ? phone.trim() : row.phone,
     discordInfo !== undefined ? ((discordInfo || '').trim() || null) : row.discord_info,
     rank_id,
     active !== undefined ? (active ? 1 : 0) : row.active,
@@ -440,7 +441,7 @@ function getEmployeeWithAccess(req, res, employeeId) {
 }
 
 app.get('/api/payroll', requireAuth, (req, res) => {
-  const { employeeId, paid } = req.query;
+  const { employeeId, paid, department } = req.query;
   const scopedDept = req.session.adminDepartment;
   const conditions = [];
   const params = [];
@@ -452,6 +453,9 @@ app.get('/api/payroll', requireAuth, (req, res) => {
   if (scopedDept) {
     conditions.push('e.department = ?');
     params.push(scopedDept);
+  } else if (department && VALID_DEPARTMENTS.includes(department)) {
+    conditions.push('e.department = ?');
+    params.push(department);
   }
   if (paid === '0' || paid === '1') {
     conditions.push('p.paid = ?');
