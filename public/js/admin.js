@@ -483,22 +483,48 @@ function renderPersonalStats() {
     });
 }
 
-function employeeCardHtml(e) {
+function kanbanCardHtml(e) {
   const tier = tierForLevel(e.rank_level);
   return `
-    <div class="employee-card${e.active ? '' : ' is-inactive'}" style="--tier-color:${tier.solid}" data-employee-id="${e.id}">
-      <div class="employee-card-top">
-        <div class="employee-avatar">${escapeHtml(initials(e.full_name))}</div>
-        <div class="employee-card-name-wrap">
-          <div class="employee-card-name">${escapeHtml(e.full_name)}</div>
-          <span class="rank-badge" style="background:${tier.soft};color:${tier.solid}">Nv.${e.rank_level} · ${escapeHtml(e.rank_name)}</span>
-        </div>
-        <span class="employee-status-dot${e.active ? '' : ' is-inactive'}" title="${e.active ? 'Activo' : 'Inactivo'}"></span>
+    <div class="kanban-card${e.active ? '' : ' is-inactive'}" data-employee-id="${e.id}" title="${escapeHtml(e.rank_name)}">
+      <span class="kanban-avatar" style="background:${tier.solid}">${escapeHtml(initials(e.full_name))}</span>
+      <span class="kanban-name">${escapeHtml(e.full_name)}</span>
+      <span class="dept-badge dept-${e.department} kanban-dept-badge">${departmentLabel(e.department)}</span>
+      <span class="employee-status-dot${e.active ? '' : ' is-inactive'}" title="${e.active ? 'Activo' : 'Inactivo'}"></span>
+    </div>
+  `;
+}
+
+function rankNameForLevel(level, department) {
+  const rank = ranks.find((r) => r.level === level && (r.department === department || (!r.department && !department)));
+  return rank ? rank.name : null;
+}
+
+function kanbanColumnSubtitle(level) {
+  if (scopedDepartment) return rankNameForLevel(level, scopedDepartment) || '';
+  if (currentPersonalDeptFilter) return rankNameForLevel(level, currentPersonalDeptFilter) || '';
+
+  const shared = rankNameForLevel(level, null);
+  if (shared) return shared;
+  const samsName = rankNameForLevel(level, 'sams');
+  const safdName = rankNameForLevel(level, 'safd');
+  return `SAMS: ${samsName || '—'} · SAFD: ${safdName || '—'}`;
+}
+
+function kanbanColumnHtml(level, list) {
+  const tier = tierForLevel(level);
+  const levelEmployees = list.filter((e) => e.rank_level === level);
+  return `
+    <div class="kanban-column">
+      <div class="kanban-column-header" style="background:${tier.soft}">
+        <div class="kanban-column-level" style="color:${tier.solid}">Nv. ${level}</div>
+        <div class="kanban-column-tier">${tier.label}</div>
+        <div class="kanban-column-subtitle">${escapeHtml(kanbanColumnSubtitle(level))}</div>
       </div>
-      <div class="employee-card-meta">
-        <span>☎ ${escapeHtml(e.phone || 'Sin teléfono')}</span>
-        <span>#${escapeHtml(e.discord_info || 'Sin Discord')}</span>
-        <span>$${Number(e.rank_hourly_rate).toFixed(2)}/h</span>
+      <div class="kanban-column-body">
+        ${levelEmployees.length === 0
+          ? '<div class="kanban-empty">Sin empleados</div>'
+          : levelEmployees.map(kanbanCardHtml).join('')}
       </div>
     </div>
   `;
@@ -515,27 +541,11 @@ function getFilteredEmployees() {
   ));
 }
 
-function employeeGroupHtml(dept, list) {
-  const deptList = list.filter((e) => e.department === dept);
-  return `
-    <div class="employee-group">
-      <div class="employee-group-header">
-        <span class="dept-badge dept-${dept}">${departmentLabel(dept)}</span>
-        <span class="employee-group-count">${deptList.length} empleado${deptList.length === 1 ? '' : 's'}</span>
-      </div>
-      ${deptList.length === 0
-        ? '<div class="staff-empty">Sin empleados en este departamento.</div>'
-        : `<div class="employee-grid">${deptList.map(employeeCardHtml).join('')}</div>`}
-    </div>
-  `;
-}
-
 function renderEmployeesBoard() {
   const employeesSearchEmpty = document.getElementById('employees-search-empty');
 
   if (employees.length === 0) {
     employeesColumns.innerHTML = '';
-    employeesColumns.className = '';
     employeesEmpty.style.display = 'block';
     employeesSearchEmpty.style.display = 'none';
     return;
@@ -545,18 +555,14 @@ function renderEmployeesBoard() {
   const filtered = getFilteredEmployees();
   if (filtered.length === 0) {
     employeesColumns.innerHTML = '';
-    employeesColumns.className = '';
     employeesSearchEmpty.style.display = 'block';
     return;
   }
   employeesSearchEmpty.style.display = 'none';
 
-  const groups = scopedDepartment
-    ? [scopedDepartment]
-    : (currentPersonalDeptFilter ? [currentPersonalDeptFilter] : ['sams', 'safd']);
-
-  employeesColumns.className = groups.length === 2 ? 'employees-columns two-col' : 'employees-columns';
-  employeesColumns.innerHTML = groups.map((dept) => employeeGroupHtml(dept, filtered)).join('');
+  const levels = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+  employeesColumns.className = 'kanban-board';
+  employeesColumns.innerHTML = levels.map((level) => kanbanColumnHtml(level, filtered)).join('');
 
   employeesColumns.querySelectorAll('[data-employee-id]').forEach((card) => {
     card.addEventListener('click', () => openEmployeeModal(Number(card.dataset.employeeId)));
