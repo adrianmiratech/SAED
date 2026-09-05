@@ -5,3 +5,6 @@ data.sqlite-journal
 data.sqlite-wal
 data.sqlite-shm
 server.log
+
+.vercel
+.env*
