@@ -42,13 +42,13 @@ const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 
 // ---------- Auth ----------
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
   }
 
-  const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
+  const admin = await db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
   if (!admin || !bcrypt.compareSync(password, admin.password_hash)) {
     return res.status(401).json({ error: 'Credenciales inválidas' });
   }
@@ -73,12 +73,12 @@ app.get('/api/session', (req, res) => {
 
 // ---------- Staff ----------
 
-app.get('/api/admins', requireAuth, requireSuperAdmin, (req, res) => {
-  const rows = db.prepare('SELECT id, username, department, created_at FROM admins ORDER BY created_at ASC').all();
+app.get('/api/admins', requireAuth, requireSuperAdmin, async (req, res) => {
+  const rows = await db.prepare('SELECT id, username, department, created_at FROM admins ORDER BY created_at ASC').all();
   res.json(rows);
 });
 
-app.post('/api/admins', requireAuth, requireSuperAdmin, (req, res) => {
+app.post('/api/admins', requireAuth, requireSuperAdmin, async (req, res) => {
   const { username, password, department } = req.body || {};
 
   if (!username || !password) {
@@ -91,20 +91,20 @@ app.post('/api/admins', requireAuth, requireSuperAdmin, (req, res) => {
     return res.status(400).json({ error: 'Departamento inválido' });
   }
 
-  const existing = db.prepare('SELECT id FROM admins WHERE username = ?').get(username.trim());
+  const existing = await db.prepare('SELECT id FROM admins WHERE username = ?').get(username.trim());
   if (existing) {
     return res.status(409).json({ error: 'Ya existe un usuario con ese nombre' });
   }
 
   const hash = bcrypt.hashSync(password, 10);
-  const info = db.prepare('INSERT INTO admins (username, password_hash, department) VALUES (?, ?, ?)')
+  const info = await db.prepare('INSERT INTO admins (username, password_hash, department) VALUES (?, ?, ?)')
     .run(username.trim(), hash, department || null);
 
   res.status(201).json({ id: info.lastInsertRowid, username: username.trim(), department: department || null });
 });
 
-app.delete('/api/admins/:id', requireAuth, requireSuperAdmin, (req, res) => {
-  const target = db.prepare('SELECT * FROM admins WHERE id = ?').get(req.params.id);
+app.delete('/api/admins/:id', requireAuth, requireSuperAdmin, async (req, res) => {
+  const target = await db.prepare('SELECT * FROM admins WHERE id = ?').get(req.params.id);
   if (!target) return res.status(404).json({ error: 'No encontrado' });
 
   if (target.username === req.session.adminUser) {
@@ -112,13 +112,13 @@ app.delete('/api/admins/:id', requireAuth, requireSuperAdmin, (req, res) => {
   }
 
   if (!target.department) {
-    const superAdminCount = db.prepare('SELECT COUNT(*) AS c FROM admins WHERE department IS NULL').get().c;
+    const superAdminCount = (await db.prepare('SELECT COUNT(*) AS c FROM admins WHERE department IS NULL').get()).c;
     if (superAdminCount <= 1) {
       return res.status(400).json({ error: 'No podés eliminar el único usuario con acceso a todos los departamentos' });
     }
   }
 
-  db.prepare('DELETE FROM admins WHERE id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM admins WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -150,7 +150,7 @@ app.post('/api/applications', async (req, res) => {
        previous_saed_experience, previous_saed_details)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  const info = insert.run(
+  const info = await insert.run(
     department, fullName.trim(), ageNum, country.trim(), discordInfo.trim(),
     experience.trim(), motivation.trim(), criminalRecord,
     previousSaedExperience, (previousSaedDetails || '').trim() || null,
@@ -245,7 +245,7 @@ function requireDepartmentAccess(req, res, row) {
   return true;
 }
 
-app.get('/api/applications', requireAuth, (req, res) => {
+app.get('/api/applications', requireAuth, async (req, res) => {
   const { status, department } = req.query;
   const scopedDept = req.session.adminDepartment;
   const conditions = [];
@@ -264,20 +264,20 @@ app.get('/api/applications', requireAuth, (req, res) => {
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const rows = db.prepare(`SELECT * FROM applications ${where} ORDER BY created_at DESC`).all(...params);
+  const rows = await db.prepare(`SELECT * FROM applications ${where} ORDER BY created_at DESC`).all(...params);
   res.json(rows);
 });
 
-app.get('/api/applications/:id', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
+app.get('/api/applications/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
   if (!requireDepartmentAccess(req, res, row)) return;
   res.json(row);
 });
 
-app.patch('/api/applications/:id', requireAuth, (req, res) => {
+app.patch('/api/applications/:id', requireAuth, async (req, res) => {
   const { status, reviewNotes } = req.body || {};
-  const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
+  const row = await db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
@@ -285,7 +285,7 @@ app.patch('/api/applications/:id', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Estado inválido' });
   }
 
-  db.prepare(`
+  await db.prepare(`
     UPDATE applications
     SET status = ?, review_notes = ?, reviewed_by = ?, reviewed_at = datetime('now')
     WHERE id = ?
@@ -299,42 +299,42 @@ app.patch('/api/applications/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/applications/:id', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
+app.delete('/api/applications/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
-  db.prepare('DELETE FROM applications WHERE id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM applications WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
 // ---------- Rangos ----------
 
-app.get('/api/ranks', requireAuth, (req, res) => {
+app.get('/api/ranks', requireAuth, async (req, res) => {
   const scopedDept = req.session.adminDepartment;
   const rows = scopedDept
-    ? db.prepare('SELECT * FROM ranks WHERE department IS NULL OR department = ? ORDER BY level DESC').all(scopedDept)
-    : db.prepare('SELECT * FROM ranks ORDER BY level DESC').all();
+    ? await db.prepare('SELECT * FROM ranks WHERE department IS NULL OR department = ? ORDER BY level DESC').all(scopedDept)
+    : await db.prepare('SELECT * FROM ranks ORDER BY level DESC').all();
   res.json(rows);
 });
 
-app.patch('/api/ranks/:id', requireAuth, requireSuperAdmin, (req, res) => {
+app.patch('/api/ranks/:id', requireAuth, requireSuperAdmin, async (req, res) => {
   const { hourlyRate } = req.body || {};
   const rateNum = Number(hourlyRate);
   if (!Number.isFinite(rateNum) || rateNum < 0) {
     return res.status(400).json({ error: 'Tarifa por hora inválida' });
   }
 
-  const rank = db.prepare('SELECT id FROM ranks WHERE id = ?').get(req.params.id);
+  const rank = await db.prepare('SELECT id FROM ranks WHERE id = ?').get(req.params.id);
   if (!rank) return res.status(404).json({ error: 'Rango no encontrado' });
 
-  db.prepare('UPDATE ranks SET hourly_rate = ? WHERE id = ?').run(rateNum, req.params.id);
+  await db.prepare('UPDATE ranks SET hourly_rate = ? WHERE id = ?').run(rateNum, req.params.id);
   res.json({ ok: true });
 });
 
 // ---------- Empleados ----------
 
-app.get('/api/employees', requireAuth, (req, res) => {
+app.get('/api/employees', requireAuth, async (req, res) => {
   const { department } = req.query;
   const scopedDept = req.session.adminDepartment;
   const conditions = [];
@@ -349,7 +349,7 @@ app.get('/api/employees', requireAuth, (req, res) => {
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT e.*, r.level AS rank_level, r.name AS rank_name, r.hourly_rate AS rank_hourly_rate
     FROM employees e
     JOIN ranks r ON r.id = e.rank_id
@@ -359,14 +359,14 @@ app.get('/api/employees', requireAuth, (req, res) => {
   res.json(rows);
 });
 
-function validateRankForDepartment(rankId, department) {
-  const rank = db.prepare('SELECT * FROM ranks WHERE id = ?').get(rankId);
+async function validateRankForDepartment(rankId, department) {
+  const rank = await db.prepare('SELECT * FROM ranks WHERE id = ?').get(rankId);
   if (!rank) return null;
   if (rank.department && rank.department !== department) return null;
   return rank;
 }
 
-app.post('/api/employees', requireAuth, (req, res) => {
+app.post('/api/employees', requireAuth, async (req, res) => {
   const { fullName, phone, discordInfo, rankId } = req.body || {};
   const scopedDept = req.session.adminDepartment;
   const department = scopedDept || req.body?.department;
@@ -377,12 +377,12 @@ app.post('/api/employees', requireAuth, (req, res) => {
   if (!VALID_DEPARTMENTS.includes(department)) {
     return res.status(400).json({ error: 'Departamento inválido' });
   }
-  const rank = validateRankForDepartment(rankId, department);
+  const rank = await validateRankForDepartment(rankId, department);
   if (!rank) {
     return res.status(400).json({ error: 'Rango inválido para ese departamento' });
   }
 
-  const info = db.prepare(`
+  const info = await db.prepare(`
     INSERT INTO employees (full_name, phone, discord_info, department, rank_id, created_by)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(fullName.trim(), phone.trim(), (discordInfo || '').trim() || null, department, rank.id, req.session.adminUser);
@@ -390,20 +390,20 @@ app.post('/api/employees', requireAuth, (req, res) => {
   res.status(201).json({ id: info.lastInsertRowid });
 });
 
-app.patch('/api/employees/:id', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
+app.patch('/api/employees/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrado' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
   const { fullName, phone, discordInfo, rankId, active } = req.body || {};
   let rank_id = row.rank_id;
   if (rankId !== undefined) {
-    const rank = validateRankForDepartment(rankId, row.department);
+    const rank = await validateRankForDepartment(rankId, row.department);
     if (!rank) return res.status(400).json({ error: 'Rango inválido para ese departamento' });
     rank_id = rank.id;
   }
 
-  db.prepare(`
+  await db.prepare(`
     UPDATE employees SET full_name = ?, phone = ?, discord_info = ?, rank_id = ?, active = ?
     WHERE id = ?
   `).run(
@@ -418,20 +418,20 @@ app.patch('/api/employees/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/employees/:id', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
+app.delete('/api/employees/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrado' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
-  db.prepare('DELETE FROM payroll WHERE employee_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM employees WHERE id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM payroll WHERE employee_id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM employees WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
 // ---------- Nómina ----------
 
-function getEmployeeWithAccess(req, res, employeeId) {
-  const employee = db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+async function getEmployeeWithAccess(req, res, employeeId) {
+  const employee = await db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
   if (!employee) {
     res.status(404).json({ error: 'Empleado no encontrado' });
     return null;
@@ -440,7 +440,7 @@ function getEmployeeWithAccess(req, res, employeeId) {
   return employee;
 }
 
-app.get('/api/payroll', requireAuth, (req, res) => {
+app.get('/api/payroll', requireAuth, async (req, res) => {
   const { employeeId, paid, department } = req.query;
   const scopedDept = req.session.adminDepartment;
   const conditions = [];
@@ -463,7 +463,7 @@ app.get('/api/payroll', requireAuth, (req, res) => {
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT p.*, e.full_name AS employee_name, e.department AS employee_department
     FROM payroll p
     JOIN employees e ON e.id = p.employee_id
@@ -473,21 +473,21 @@ app.get('/api/payroll', requireAuth, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/payroll', requireAuth, (req, res) => {
+app.post('/api/payroll', requireAuth, async (req, res) => {
   const { employeeId, hours, periodLabel } = req.body || {};
   const hoursNum = Number(hours);
   if (!employeeId || !Number.isFinite(hoursNum) || hoursNum <= 0) {
     return res.status(400).json({ error: 'Empleado y cantidad de horas (mayor a 0) son requeridos' });
   }
 
-  const employee = getEmployeeWithAccess(req, res, employeeId);
+  const employee = await getEmployeeWithAccess(req, res, employeeId);
   if (!employee) return;
 
-  const rank = db.prepare('SELECT * FROM ranks WHERE id = ?').get(employee.rank_id);
+  const rank = await db.prepare('SELECT * FROM ranks WHERE id = ?').get(employee.rank_id);
   const rate = rank ? rank.hourly_rate : 0;
   const total = Math.round(hoursNum * rate * 100) / 100;
 
-  const info = db.prepare(`
+  const info = await db.prepare(`
     INSERT INTO payroll (employee_id, hours, hourly_rate, total_amount, period_label, created_by)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(employee.id, hoursNum, rate, total, (periodLabel || '').trim() || null, req.session.adminUser);
@@ -496,14 +496,14 @@ app.post('/api/payroll', requireAuth, (req, res) => {
 });
 
 app.patch('/api/payroll/:id', requireAuth, async (req, res) => {
-  const row = db.prepare('SELECT * FROM payroll WHERE id = ?').get(req.params.id);
+  const row = await db.prepare('SELECT * FROM payroll WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
-  const employee = getEmployeeWithAccess(req, res, row.employee_id);
+  const employee = await getEmployeeWithAccess(req, res, row.employee_id);
   if (!employee) return;
 
   const { paid } = req.body || {};
   const paidAt = paid ? new Date().toISOString() : null;
-  db.prepare(`
+  await db.prepare(`
     UPDATE payroll SET paid = ?, paid_at = ? WHERE id = ?
   `).run(paid ? 1 : 0, paidAt, req.params.id);
 
@@ -512,7 +512,7 @@ app.patch('/api/payroll/:id', requireAuth, async (req, res) => {
   // termine ANTES de responder para no dejarlo como tarea de fondo que
   // puede cortarse si el proceso se reinicia justo después de responder.
   if (paid && !row.paid) {
-    const rank = db.prepare('SELECT * FROM ranks WHERE id = ?').get(employee.rank_id);
+    const rank = await db.prepare('SELECT * FROM ranks WHERE id = ?').get(employee.rank_id);
     try {
       await notifyPayrollPaid({
         department: employee.department,
@@ -533,13 +533,13 @@ app.patch('/api/payroll/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/payroll/:id', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM payroll WHERE id = ?').get(req.params.id);
+app.delete('/api/payroll/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM payroll WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
-  const employee = getEmployeeWithAccess(req, res, row.employee_id);
+  const employee = await getEmployeeWithAccess(req, res, row.employee_id);
   if (!employee) return;
 
-  db.prepare('DELETE FROM payroll WHERE id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM payroll WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 

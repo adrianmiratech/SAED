@@ -22,17 +22,19 @@ if (departmentArg && !VALID_DEPARTMENTS.includes(departmentArg)) {
   process.exit(1);
 }
 
-const hash = bcrypt.hashSync(password, 10);
+(async () => {
+  const hash = bcrypt.hashSync(password, 10);
 
-const existing = db.prepare('SELECT id, department FROM admins WHERE username = ?').get(username);
-const department = departmentArg !== undefined && process.argv.length > 4
-  ? (departmentArg || null)
-  : (existing ? existing.department : null);
+  const existing = await db.prepare('SELECT id, department FROM admins WHERE username = ?').get(username);
+  const department = departmentArg !== undefined && process.argv.length > 4
+    ? (departmentArg || null)
+    : (existing ? existing.department : null);
 
-if (existing) {
-  db.prepare('UPDATE admins SET password_hash = ?, department = ? WHERE username = ?').run(hash, department, username);
-  console.log(`Contraseña actualizada para "${username}". Departamento: ${department || 'todos'}.`);
-} else {
-  db.prepare('INSERT INTO admins (username, password_hash, department) VALUES (?, ?, ?)').run(username, hash, department);
-  console.log(`Usuario "${username}" creado. Departamento: ${department || 'todos'}.`);
-}
+  if (existing) {
+    await db.prepare('UPDATE admins SET password_hash = ?, department = ? WHERE username = ?').run(hash, department, username);
+    console.log(`Contraseña actualizada para "${username}". Departamento: ${department || 'todos'}.`);
+  } else {
+    await db.prepare('INSERT INTO admins (username, password_hash, department) VALUES (?, ?, ?)').run(username, hash, department);
+    console.log(`Usuario "${username}" creado. Departamento: ${department || 'todos'}.`);
+  }
+})();
