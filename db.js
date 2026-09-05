@@ -32,7 +32,70 @@ db.exec(`
     department TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS ranks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    level INTEGER NOT NULL,
+    department TEXT,
+    name TEXT NOT NULL,
+    hourly_rate REAL NOT NULL DEFAULT 0,
+    UNIQUE(level, department)
+  );
+
+  CREATE TABLE IF NOT EXISTS employees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL,
+    discord_info TEXT,
+    department TEXT NOT NULL,
+    rank_id INTEGER NOT NULL REFERENCES ranks(id),
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS payroll (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    hours REAL NOT NULL,
+    hourly_rate REAL NOT NULL,
+    total_amount REAL NOT NULL,
+    period_label TEXT,
+    paid INTEGER NOT NULL DEFAULT 0,
+    paid_at TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
+
+// Siembra los rangos oficiales del SAED si la tabla está vacía. Los niveles
+// 9, 8 y 0 son compartidos por ambos departamentos; el resto tiene una
+// variante para SAMS y otra para SAFD.
+const rankCount = db.prepare('SELECT COUNT(*) AS c FROM ranks').get().c;
+if (rankCount === 0) {
+  const insertRank = db.prepare('INSERT INTO ranks (level, department, name, hourly_rate) VALUES (?, ?, ?, 0)');
+  const seedRanks = [
+    [9, null, 'Jefe SAED'],
+    [8, null, 'Supervisor SAED'],
+    [7, 'sams', 'Director Médico'],
+    [7, 'safd', 'Jefe de Batallón'],
+    [6, 'sams', 'Subdirector Médico'],
+    [6, 'safd', 'Capitán'],
+    [5, 'sams', 'Cirujano'],
+    [5, 'safd', 'Teniente'],
+    [4, 'sams', 'Médico General'],
+    [4, 'safd', 'Ingeniero II'],
+    [3, 'sams', 'Jefe de Residentes'],
+    [3, 'safd', 'Ingeniero I'],
+    [2, 'sams', 'Residente'],
+    [2, 'safd', 'Bombero'],
+    [1, 'sams', 'Estudiante de Medicina'],
+    [1, 'safd', 'Bombero en pruebas'],
+    [0, null, 'Voluntario'],
+  ];
+  for (const [level, department, name] of seedRanks) {
+    insertRank.run(level, department, name);
+  }
+}
 
 // Migración: agrega la columna department si la base ya existía sin ella
 // (todas las postulaciones previas eran de SAMS).

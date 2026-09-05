@@ -263,16 +263,40 @@ button, .btn {
 }
 
 .filter-btn,
-.dept-filter-btn {
+.dept-filter-btn,
+.tab-btn,
+.personal-dept-filter-btn {
   background: var(--panel-alt);
   border: 1px solid var(--border);
   color: var(--text-muted);
 }
 .filter-btn.active,
-.dept-filter-btn.active {
+.dept-filter-btn.active,
+.tab-btn.active,
+.personal-dept-filter-btn.active {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
+}
+
+.active-check-label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400 !important;
+}
+
+.rate-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rate-row .rate-name {
+  flex: 1;
+  font-size: 14px;
+}
+.rate-row input {
+  width: 110px;
 }
 
 .search-input {

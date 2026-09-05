@@ -278,6 +278,213 @@ app.delete('/api/applications/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Rangos ----------
+
+app.get('/api/ranks', requireAuth, (req, res) => {
+  const scopedDept = req.session.adminDepartment;
+  const rows = scopedDept
+    ? db.prepare('SELECT * FROM ranks WHERE department IS NULL OR department = ? ORDER BY level DESC').all(scopedDept)
+    : db.prepare('SELECT * FROM ranks ORDER BY level DESC').all();
+  res.json(rows);
+});
+
+app.patch('/api/ranks/:id', requireAuth, requireSuperAdmin, (req, res) => {
+  const { hourlyRate } = req.body || {};
+  const rateNum = Number(hourlyRate);
+  if (!Number.isFinite(rateNum) || rateNum < 0) {
+    return res.status(400).json({ error: 'Tarifa por hora inválida' });
+  }
+
+  const rank = db.prepare('SELECT id FROM ranks WHERE id = ?').get(req.params.id);
+  if (!rank) return res.status(404).json({ error: 'Rango no encontrado' });
+
+  db.prepare('UPDATE ranks SET hourly_rate = ? WHERE id = ?').run(rateNum, req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- Empleados ----------
+
+app.get('/api/employees', requireAuth, (req, res) => {
+  const { department } = req.query;
+  const scopedDept = req.session.adminDepartment;
+  const conditions = [];
+  const params = [];
+
+  if (scopedDept) {
+    conditions.push('e.department = ?');
+    params.push(scopedDept);
+  } else if (department && VALID_DEPARTMENTS.includes(department)) {
+    conditions.push('e.department = ?');
+    params.push(department);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = db.prepare(`
+    SELECT e.*, r.level AS rank_level, r.name AS rank_name, r.hourly_rate AS rank_hourly_rate
+    FROM employees e
+    JOIN ranks r ON r.id = e.rank_id
+    ${where}
+    ORDER BY e.active DESC, r.level DESC, e.full_name ASC
+  `).all(...params);
+  res.json(rows);
+});
+
+function validateRankForDepartment(rankId, department) {
+  const rank = db.prepare('SELECT * FROM ranks WHERE id = ?').get(rankId);
+  if (!rank) return null;
+  if (rank.department && rank.department !== department) return null;
+  return rank;
+}
+
+app.post('/api/employees', requireAuth, (req, res) => {
+  const { fullName, discordInfo, rankId } = req.body || {};
+  const scopedDept = req.session.adminDepartment;
+  const department = scopedDept || req.body?.department;
+
+  if (!fullName || !department || !rankId) {
+    return res.status(400).json({ error: 'Faltan campos obligatorios' });
+  }
+  if (!VALID_DEPARTMENTS.includes(department)) {
+    return res.status(400).json({ error: 'Departamento inválido' });
+  }
+  const rank = validateRankForDepartment(rankId, department);
+  if (!rank) {
+    return res.status(400).json({ error: 'Rango inválido para ese departamento' });
+  }
+
+  const info = db.prepare(`
+    INSERT INTO employees (full_name, discord_info, department, rank_id, created_by)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(fullName.trim(), (discordInfo || '').trim() || null, department, rank.id, req.session.adminUser);
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+app.patch('/api/employees/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrado' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  const { fullName, discordInfo, rankId, active } = req.body || {};
+  let rank_id = row.rank_id;
+  if (rankId !== undefined) {
+    const rank = validateRankForDepartment(rankId, row.department);
+    if (!rank) return res.status(400).json({ error: 'Rango inválido para ese departamento' });
+    rank_id = rank.id;
+  }
+
+  db.prepare(`
+    UPDATE employees SET full_name = ?, discord_info = ?, rank_id = ?, active = ?
+    WHERE id = ?
+  `).run(
+    fullName !== undefined ? fullName.trim() : row.full_name,
+    discordInfo !== undefined ? ((discordInfo || '').trim() || null) : row.discord_info,
+    rank_id,
+    active !== undefined ? (active ? 1 : 0) : row.active,
+    req.params.id,
+  );
+
+  res.json({ ok: true });
+});
+
+app.delete('/api/employees/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrado' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  db.prepare('DELETE FROM payroll WHERE employee_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM employees WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- Nómina ----------
+
+function getEmployeeWithAccess(req, res, employeeId) {
+  const employee = db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+  if (!employee) {
+    res.status(404).json({ error: 'Empleado no encontrado' });
+    return null;
+  }
+  if (!requireDepartmentAccess(req, res, employee)) return null;
+  return employee;
+}
+
+app.get('/api/payroll', requireAuth, (req, res) => {
+  const { employeeId, paid } = req.query;
+  const scopedDept = req.session.adminDepartment;
+  const conditions = [];
+  const params = [];
+
+  if (employeeId) {
+    conditions.push('p.employee_id = ?');
+    params.push(employeeId);
+  }
+  if (scopedDept) {
+    conditions.push('e.department = ?');
+    params.push(scopedDept);
+  }
+  if (paid === '0' || paid === '1') {
+    conditions.push('p.paid = ?');
+    params.push(Number(paid));
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = db.prepare(`
+    SELECT p.*, e.full_name AS employee_name, e.department AS employee_department
+    FROM payroll p
+    JOIN employees e ON e.id = p.employee_id
+    ${where}
+    ORDER BY p.created_at DESC
+  `).all(...params);
+  res.json(rows);
+});
+
+app.post('/api/payroll', requireAuth, (req, res) => {
+  const { employeeId, hours, periodLabel } = req.body || {};
+  const hoursNum = Number(hours);
+  if (!employeeId || !Number.isFinite(hoursNum) || hoursNum <= 0) {
+    return res.status(400).json({ error: 'Empleado y cantidad de horas (mayor a 0) son requeridos' });
+  }
+
+  const employee = getEmployeeWithAccess(req, res, employeeId);
+  if (!employee) return;
+
+  const rank = db.prepare('SELECT * FROM ranks WHERE id = ?').get(employee.rank_id);
+  const rate = rank ? rank.hourly_rate : 0;
+  const total = Math.round(hoursNum * rate * 100) / 100;
+
+  const info = db.prepare(`
+    INSERT INTO payroll (employee_id, hours, hourly_rate, total_amount, period_label, created_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(employee.id, hoursNum, rate, total, (periodLabel || '').trim() || null, req.session.adminUser);
+
+  res.status(201).json({ id: info.lastInsertRowid, total });
+});
+
+app.patch('/api/payroll/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM payroll WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  const employee = getEmployeeWithAccess(req, res, row.employee_id);
+  if (!employee) return;
+
+  const { paid } = req.body || {};
+  db.prepare(`
+    UPDATE payroll SET paid = ?, paid_at = ? WHERE id = ?
+  `).run(paid ? 1 : 0, paid ? new Date().toISOString() : null, req.params.id);
+
+  res.json({ ok: true });
+});
+
+app.delete('/api/payroll/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM payroll WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  const employee = getEmployeeWithAccess(req, res, row.employee_id);
+  if (!employee) return;
+
+  db.prepare('DELETE FROM payroll WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`SAED - Gestión de postulaciones corriendo en http://localhost:${PORT}`);

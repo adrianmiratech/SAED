@@ -25,6 +25,12 @@
   </div>
 
   <div class="container wide">
+    <div class="toolbar" id="main-tabs">
+      <button class="btn tab-btn active" data-tab="postulaciones">Postulaciones</button>
+      <button class="btn tab-btn" data-tab="personal">Personal</button>
+    </div>
+
+    <div id="tab-postulaciones">
     <div class="stats-grid" id="stats-grid">
       <div class="stat-card">
         <div class="stat-value" id="stat-total">–</div>
@@ -79,6 +85,127 @@
           <div class="empty-icon">📭</div>
           <p>No hay postulaciones en esta categoría.</p>
         </div>
+      </div>
+    </div>
+    </div>
+
+    <div id="tab-personal" style="display:none">
+      <div class="card">
+        <div class="toolbar" id="personal-dept-filter-row">
+          <button class="btn personal-dept-filter-btn active" data-department="">Todos los departamentos</button>
+          <button class="btn personal-dept-filter-btn" data-department="sams">SAMS</button>
+          <button class="btn personal-dept-filter-btn" data-department="safd">SAFD</button>
+        </div>
+        <div class="toolbar">
+          <button id="rates-btn" class="btn btn-ghost btn-sm" style="display:none">Configurar tarifas por rango</button>
+          <span style="flex:1"></span>
+          <button id="new-employee-btn" class="btn-primary btn-sm">+ Nuevo empleado</button>
+        </div>
+
+        <div id="employees-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Departamento</th>
+                <th>Nombre</th>
+                <th>Rango</th>
+                <th>Tarifa/hora</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="employees-table-body"></tbody>
+          </table>
+          <div id="employees-empty" class="empty-state" style="display:none">
+            <div class="empty-icon">👥</div>
+            <p>No hay empleados cargados en esta categoría.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="employee-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="employee-modal-name"></h2>
+          <p class="subtitle" id="employee-modal-sub"></p>
+        </div>
+        <div class="modal-header-badges">
+          <span id="employee-modal-department"></span>
+          <span id="employee-modal-active"></span>
+        </div>
+      </div>
+
+      <h3 class="modal-section-title">Datos del empleado</h3>
+      <form id="employee-form">
+        <label for="employee-fullname">Nombre completo</label>
+        <input type="text" id="employee-fullname" required autocomplete="off" />
+
+        <label for="employee-discord">Usuario de Discord</label>
+        <input type="text" id="employee-discord" autocomplete="off" />
+
+        <div id="employee-department-field">
+          <label for="employee-department">Departamento</label>
+          <select id="employee-department">
+            <option value="sams">SAMS</option>
+            <option value="safd">SAFD</option>
+          </select>
+        </div>
+
+        <label for="employee-rank">Rango</label>
+        <select id="employee-rank"></select>
+
+        <label class="active-check-label" for="employee-active" id="employee-active-field" style="display:none">
+          <input type="checkbox" id="employee-active" style="width:auto" /> Empleado activo
+        </label>
+
+        <div class="submit-row">
+          <button type="submit" class="btn-primary" id="employee-form-submit">Crear empleado</button>
+        </div>
+        <div id="employee-message" class="message"></div>
+      </form>
+
+      <div id="employee-payroll-section" style="display:none">
+        <h3 class="modal-section-title">Registrar horas</h3>
+        <div class="row">
+          <div>
+            <label for="payroll-hours">Horas trabajadas</label>
+            <input type="number" id="payroll-hours" min="0" step="0.5" />
+          </div>
+          <div>
+            <label for="payroll-period">Período <span class="hint">(opcional)</span></label>
+            <input type="text" id="payroll-period" placeholder="Ej: Semana 1 - Sept 2026" />
+          </div>
+        </div>
+        <div class="submit-row">
+          <button type="button" id="payroll-add-btn" class="btn-primary btn-sm">Generar nómina</button>
+        </div>
+        <div id="payroll-message" class="message"></div>
+
+        <h3 class="modal-section-title">Historial de nómina</h3>
+        <div id="payroll-list" class="staff-list"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="employee-modal-close">Cerrar</button>
+        <button class="btn btn-danger btn-sm" id="employee-delete-btn" style="display:none">Eliminar empleado</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="rates-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2>Tarifas por rango</h2>
+          <p class="subtitle">Definí cuánto cobra cada rango por hora trabajada.</p>
+        </div>
+      </div>
+      <div id="rates-list" class="staff-list"></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="rates-modal-close">Cerrar</button>
       </div>
     </div>
   </div>
