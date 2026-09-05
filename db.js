@@ -4,7 +4,11 @@ const { createClient } = require('@libsql/client');
 // Turso (libSQL alojado) en producción para que los datos persistan de
 // verdad en Vercel (su filesystem es efímero); en desarrollo local, si no
 // hay credenciales de Turso, se usa un archivo SQLite normal en el disco.
-const url = process.env.TURSO_DATABASE_URL || `file:${path.join(__dirname, 'data.sqlite')}`;
+// Si no hay credenciales de Turso, se cae a un archivo local: en Vercel
+// el bundle es de solo lectura, así que ahí el único directorio donde se
+// puede escribir es /tmp (igual de efímero, pero al menos no falla).
+const localFallbackPath = process.env.VERCEL ? '/tmp/data.sqlite' : path.join(__dirname, 'data.sqlite');
+const url = process.env.TURSO_DATABASE_URL || `file:${localFallbackPath}`;
 const authToken = process.env.TURSO_AUTH_TOKEN;
 const client = createClient(authToken ? { url, authToken } : { url });
 
