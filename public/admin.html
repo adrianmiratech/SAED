@@ -117,11 +117,16 @@
         </div>
         <div class="toolbar">
           <button id="rates-btn" class="btn btn-ghost btn-sm" style="display:none">Configurar tarifas por rango</button>
+          <input type="text" id="personal-search-input" class="search-input" placeholder="Buscar por nombre, teléfono o Discord..." />
           <span style="flex:1"></span>
           <button id="new-employee-btn" class="btn-primary btn-sm">+ Nuevo empleado</button>
         </div>
 
         <div id="employees-columns"></div>
+        <div id="employees-search-empty" class="empty-state" style="display:none">
+          <div class="empty-icon">🔍</div>
+          <p>No hay empleados que coincidan con la búsqueda.</p>
+        </div>
         <div id="employees-empty" class="empty-state" style="display:none">
           <div class="empty-icon">👥</div>
           <p>No hay empleados cargados en esta categoría.</p>

@@ -507,10 +507,10 @@ app.patch('/api/payroll/:id', requireAuth, async (req, res) => {
     UPDATE payroll SET paid = ?, paid_at = ? WHERE id = ?
   `).run(paid ? 1 : 0, paidAt, req.params.id);
 
-  res.json({ ok: true });
-
   // El pago recién se notifica al pasar de pendiente a pagada (no en cada
-  // reconfirmación ni al volver a marcarla pendiente).
+  // reconfirmación ni al volver a marcarla pendiente). Se espera a que
+  // termine ANTES de responder para no dejarlo como tarea de fondo que
+  // puede cortarse si el proceso se reinicia justo después de responder.
   if (paid && !row.paid) {
     const rank = db.prepare('SELECT * FROM ranks WHERE id = ?').get(employee.rank_id);
     try {
@@ -529,6 +529,8 @@ app.patch('/api/payroll/:id', requireAuth, async (req, res) => {
       console.error('Error enviando notificación de nómina a Discord:', err.message);
     }
   }
+
+  res.json({ ok: true });
 });
 
 app.delete('/api/payroll/:id', requireAuth, (req, res) => {

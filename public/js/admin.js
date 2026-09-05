@@ -9,6 +9,7 @@ let currentUsername = null;
 let ranks = [];
 let employees = [];
 let currentPersonalDeptFilter = '';
+let currentPersonalSearch = '';
 let currentEmployeeId = null;
 
 const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
@@ -374,7 +375,10 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
   btn.addEventListener('click', () => updateStatus(btn.dataset.action, btn));
 });
 
-document.getElementById('logout-btn').addEventListener('click', async () => {
+document.getElementById('logout-btn').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = 'Cerrando...';
   await fetch('/api/logout', { method: 'POST' });
   window.location.href = '/login.html';
 });
@@ -393,6 +397,11 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
       loadEmployees();
     }
   });
+});
+
+document.getElementById('personal-search-input').addEventListener('input', (e) => {
+  currentPersonalSearch = e.target.value.trim();
+  renderEmployeesBoard();
 });
 
 document.querySelectorAll('.personal-dept-filter-btn').forEach((btn) => {
@@ -495,36 +504,59 @@ function employeeCardHtml(e) {
   `;
 }
 
-function employeeGroupHtml(dept) {
-  const list = employees.filter((e) => e.department === dept);
+function getFilteredEmployees() {
+  if (!currentPersonalSearch) return employees;
+  const term = currentPersonalSearch.toLowerCase();
+  return employees.filter((e) => (
+    e.full_name.toLowerCase().includes(term)
+    || (e.phone || '').toLowerCase().includes(term)
+    || (e.discord_info || '').toLowerCase().includes(term)
+    || e.rank_name.toLowerCase().includes(term)
+  ));
+}
+
+function employeeGroupHtml(dept, list) {
+  const deptList = list.filter((e) => e.department === dept);
   return `
     <div class="employee-group">
       <div class="employee-group-header">
         <span class="dept-badge dept-${dept}">${departmentLabel(dept)}</span>
-        <span class="employee-group-count">${list.length} empleado${list.length === 1 ? '' : 's'}</span>
+        <span class="employee-group-count">${deptList.length} empleado${deptList.length === 1 ? '' : 's'}</span>
       </div>
-      ${list.length === 0
+      ${deptList.length === 0
         ? '<div class="staff-empty">Sin empleados en este departamento.</div>'
-        : `<div class="employee-grid">${list.map(employeeCardHtml).join('')}</div>`}
+        : `<div class="employee-grid">${deptList.map(employeeCardHtml).join('')}</div>`}
     </div>
   `;
 }
 
 function renderEmployeesBoard() {
+  const employeesSearchEmpty = document.getElementById('employees-search-empty');
+
   if (employees.length === 0) {
     employeesColumns.innerHTML = '';
     employeesColumns.className = '';
     employeesEmpty.style.display = 'block';
+    employeesSearchEmpty.style.display = 'none';
     return;
   }
   employeesEmpty.style.display = 'none';
+
+  const filtered = getFilteredEmployees();
+  if (filtered.length === 0) {
+    employeesColumns.innerHTML = '';
+    employeesColumns.className = '';
+    employeesSearchEmpty.style.display = 'block';
+    return;
+  }
+  employeesSearchEmpty.style.display = 'none';
 
   const groups = scopedDepartment
     ? [scopedDepartment]
     : (currentPersonalDeptFilter ? [currentPersonalDeptFilter] : ['sams', 'safd']);
 
   employeesColumns.className = groups.length === 2 ? 'employees-columns two-col' : 'employees-columns';
-  employeesColumns.innerHTML = groups.map(employeeGroupHtml).join('');
+  employeesColumns.innerHTML = groups.map((dept) => employeeGroupHtml(dept, filtered)).join('');
 
   employeesColumns.querySelectorAll('[data-employee-id]').forEach((card) => {
     card.addEventListener('click', () => openEmployeeModal(Number(card.dataset.employeeId)));
