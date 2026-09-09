@@ -307,15 +307,20 @@ app.patch('/api/applications/:id', requireAuth, async (req, res) => {
   );
 
   if (status === 'aprobado') {
-    if (row.employee_id) {
-      // Ya se había aprobado antes: solo actualiza el rango asignado.
-      await db.prepare('UPDATE employees SET rank_id = ?, active = 1 WHERE id = ?').run(rank.id, row.employee_id);
+    // Si ya existe un empleado con el mismo nombre y departamento (por
+    // ejemplo, porque esta postulación se había aprobado antes), solo se
+    // actualiza su rango en vez de duplicarlo.
+    const existing = await db.prepare(
+      'SELECT id FROM employees WHERE department = ? AND full_name = ?',
+    ).get(row.department, row.full_name);
+
+    if (existing) {
+      await db.prepare('UPDATE employees SET rank_id = ?, active = 1 WHERE id = ?').run(rank.id, existing.id);
     } else {
-      const info = await db.prepare(`
+      await db.prepare(`
         INSERT INTO employees (full_name, discord_info, department, rank_id, created_by)
         VALUES (?, ?, ?, ?, ?)
       `).run(row.full_name, row.discord_info, row.department, rank.id, req.session.adminUser);
-      await db.prepare('UPDATE applications SET employee_id = ? WHERE id = ?').run(info.lastInsertRowid, req.params.id);
     }
   }
 

@@ -147,12 +147,6 @@ async function setup() {
   if (!columns.some((c) => c.name === 'previous_saed_details')) {
     await client.execute('ALTER TABLE applications ADD COLUMN previous_saed_details TEXT');
   }
-  // Vincula la postulación con el empleado creado en el roster de Personal
-  // al aprobarla, para no duplicarlo si se vuelve a aprobar (por ejemplo,
-  // tras cambiarle el rango asignado).
-  if (!columns.some((c) => c.name === 'employee_id')) {
-    await client.execute('ALTER TABLE applications ADD COLUMN employee_id INTEGER REFERENCES employees(id)');
-  }
 
   // Renombra el departamento de bomberos a su clave actual (SAFD).
   await client.execute("UPDATE applications SET department = 'safd' WHERE department = 'bomberos'");
