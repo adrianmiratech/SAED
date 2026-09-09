@@ -1132,6 +1132,12 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   overflow-x: auto;
 }
 
+/* Enlace de acceso del personal: se deja en el HTML pero oculto para
+   que el público que postula no se confunda con él. */
+.nav-personal-link {
+  display: none;
+}
+
 @media (max-width: 720px) {
   .about-grid, .features-grid, .requisitos-list, .dept-grid { grid-template-columns: 1fr; }
   .hero h1 { font-size: 30px; }

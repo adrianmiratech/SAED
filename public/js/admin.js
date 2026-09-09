@@ -17,6 +17,7 @@ const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 const tableBody = document.getElementById('table-body');
 const emptyEl = document.getElementById('empty');
 const modalBackdrop = document.getElementById('modal-backdrop');
+const modalRankSelect = document.getElementById('modal-rank');
 const whoamiEl = document.getElementById('whoami');
 const searchInput = document.getElementById('search-input');
 const toastContainer = document.getElementById('toast-container');
@@ -161,6 +162,7 @@ function openModal(id) {
   document.getElementById('modal-experience').textContent = a.experience;
   document.getElementById('modal-motivation').textContent = a.motivation;
   document.getElementById('modal-notes').value = a.review_notes || '';
+  populateRankSelect(a.department, null, modalRankSelect);
 
   document.getElementById('modal-status').innerHTML = `<span class="status-pill status-${a.status}">${capitalize(a.status)}</span>`;
 
@@ -195,18 +197,32 @@ function showToast(message, type = 'ok') {
 async function updateStatus(status, btn) {
   if (!currentId) return;
   const reviewNotes = document.getElementById('modal-notes').value;
+
+  if (status === 'aprobado' && !modalRankSelect.value) {
+    showToast('Elegí el rango a asignar antes de aprobar.', 'danger');
+    return;
+  }
+
   const originalText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Guardando...';
   try {
-    await fetch(`/api/applications/${currentId}`, {
+    const res = await fetch(`/api/applications/${currentId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, reviewNotes }),
+      body: JSON.stringify({
+        status,
+        reviewNotes,
+        rankId: status === 'aprobado' ? Number(modalRankSelect.value) : undefined,
+      }),
     });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo actualizar la postulación');
     closeModal();
     await loadApplications();
-    showToast('Postulación actualizada.');
+    showToast(status === 'aprobado' ? 'Postulación aprobada y sumada al roster de Personal.' : 'Postulación actualizada.');
+  } catch (err) {
+    showToast(err.message, 'danger');
   } finally {
     btn.disabled = false;
     btn.textContent = originalText;
@@ -425,12 +441,12 @@ function ranksForDepartment(department) {
   return ranks.filter((r) => !r.department || r.department === department);
 }
 
-function populateRankSelect(department, selectedRankId) {
+function populateRankSelect(department, selectedRankId, selectEl = employeeRankSelect) {
   const list = ranksForDepartment(department);
-  employeeRankSelect.innerHTML = list.map((r) => (
+  selectEl.innerHTML = list.map((r) => (
     `<option value="${r.id}">${r.level} — ${escapeHtml(r.name)}</option>`
   )).join('');
-  if (selectedRankId) employeeRankSelect.value = selectedRankId;
+  if (selectedRankId) selectEl.value = selectedRankId;
 }
 
 employeeDepartmentSelect.addEventListener('change', () => {

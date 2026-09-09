@@ -276,13 +276,23 @@ app.get('/api/applications/:id', requireAuth, async (req, res) => {
 });
 
 app.patch('/api/applications/:id', requireAuth, async (req, res) => {
-  const { status, reviewNotes } = req.body || {};
+  const { status, reviewNotes, rankId } = req.body || {};
   const row = await db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
   if (status && !VALID_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Estado inválido' });
+  }
+
+  // Al aprobar, el encargado tiene que elegir el rango del roster de
+  // Personal con el que ingresa el postulante.
+  let rank = null;
+  if (status === 'aprobado') {
+    rank = await validateRankForDepartment(rankId, row.department);
+    if (!rank) {
+      return res.status(400).json({ error: 'Rango inválido para ese departamento' });
+    }
   }
 
   await db.prepare(`
@@ -295,6 +305,19 @@ app.patch('/api/applications/:id', requireAuth, async (req, res) => {
     req.session.adminUser,
     req.params.id,
   );
+
+  if (status === 'aprobado') {
+    if (row.employee_id) {
+      // Ya se había aprobado antes: solo actualiza el rango asignado.
+      await db.prepare('UPDATE employees SET rank_id = ?, active = 1 WHERE id = ?').run(rank.id, row.employee_id);
+    } else {
+      const info = await db.prepare(`
+        INSERT INTO employees (full_name, discord_info, department, rank_id, created_by)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(row.full_name, row.discord_info, row.department, rank.id, req.session.adminUser);
+      await db.prepare('UPDATE applications SET employee_id = ? WHERE id = ?').run(info.lastInsertRowid, req.params.id);
+    }
+  }
 
   res.json({ ok: true });
 });
