@@ -42,6 +42,13 @@ function ready() {
   return readyPromise;
 }
 
+// Se ejecuta en cada arranque en frío de la función serverless, así que se
+// mantiene a lo mínimo posible: un solo viaje de ida y vuelta para crear las
+// tablas (ya con el esquema final, sin las columnas viejas de teléfono/email)
+// y otro para revisar si hay que sembrar los rangos. Las migraciones con
+// ALTER TABLE que se necesitaron en su momento para llegar a este esquema ya
+// se aplicaron contra la base real y se sacaron de acá para no pagar esos
+// viajes de más (varios PRAGMA + ALTER) en cada login.
 async function setup() {
   await client.executeMultiple(`
     CREATE TABLE IF NOT EXISTS applications (
@@ -133,48 +140,6 @@ async function setup() {
     for (const [level, department, name] of seedRanks) {
       await prepare('INSERT INTO ranks (level, department, name, hourly_rate) VALUES (?, ?, ?, 0)').run(level, department, name);
     }
-  }
-
-  // Migración: agrega la columna department si la base ya existía sin ella
-  // (todas las postulaciones previas eran de SAMS).
-  const columns = await prepare('PRAGMA table_info(applications)').all();
-  if (!columns.some((c) => c.name === 'department')) {
-    await client.execute("ALTER TABLE applications ADD COLUMN department TEXT NOT NULL DEFAULT 'sams'");
-  }
-  if (!columns.some((c) => c.name === 'previous_saed_experience')) {
-    await client.execute("ALTER TABLE applications ADD COLUMN previous_saed_experience TEXT NOT NULL DEFAULT 'No'");
-  }
-  if (!columns.some((c) => c.name === 'previous_saed_details')) {
-    await client.execute('ALTER TABLE applications ADD COLUMN previous_saed_details TEXT');
-  }
-
-  // Renombra el departamento de bomberos a su clave actual (SAFD).
-  await client.execute("UPDATE applications SET department = 'safd' WHERE department = 'bomberos'");
-
-  // Se dejaron de pedir teléfono y correo electrónico: se quitan las
-  // columnas si la base ya existía con ellas (silencioso si el motor no
-  // soporta DROP COLUMN, la columna simplemente queda sin usarse).
-  for (const col of ['phone', 'email']) {
-    if (columns.some((c) => c.name === col)) {
-      try {
-        await client.execute(`ALTER TABLE applications DROP COLUMN ${col}`);
-      } catch {
-        // Motor sin soporte para DROP COLUMN: se ignora.
-      }
-    }
-  }
-
-  // Migración: agrega la columna department a admins si la base ya existía
-  // sin ella (los admins previos quedan sin restricción, es decir, ven todo).
-  const adminColumns = await prepare('PRAGMA table_info(admins)').all();
-  if (!adminColumns.some((c) => c.name === 'department')) {
-    await client.execute('ALTER TABLE admins ADD COLUMN department TEXT');
-  }
-
-  // Migración: agrega el teléfono a empleados si la tabla ya existía sin él.
-  const employeeColumns = await prepare('PRAGMA table_info(employees)').all();
-  if (!employeeColumns.some((c) => c.name === 'phone')) {
-    await client.execute('ALTER TABLE employees ADD COLUMN phone TEXT');
   }
 
   // Re-siembra el admin desde variables de entorno si están presentes,
