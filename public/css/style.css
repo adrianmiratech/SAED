@@ -517,7 +517,6 @@ button:disabled, .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: n
 
 .filter-btn,
 .dept-filter-btn,
-.tab-btn,
 .personal-dept-filter-btn,
 .attendance-dept-filter-btn,
 .inventory-dept-filter-btn,
@@ -529,7 +528,6 @@ button:disabled, .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: n
 }
 .filter-btn.active,
 .dept-filter-btn.active,
-.tab-btn.active,
 .personal-dept-filter-btn.active,
 .attendance-dept-filter-btn.active,
 .inventory-dept-filter-btn.active,
