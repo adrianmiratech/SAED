@@ -936,15 +936,38 @@ let shifts = [];
 let currentShiftsDeptFilter = '';
 let currentShiftsSearch = '';
 let currentShiftId = null;
+let currentShiftsView = 'list';
+let currentShiftsWeekStart = getMonday(new Date());
 
 const shiftsTableBody = document.getElementById('shifts-table-body');
 const shiftsEmpty = document.getElementById('shifts-empty');
+const shiftsListView = document.getElementById('shifts-list-view');
+const shiftsCalendarView = document.getElementById('shifts-calendar-view');
+const shiftsCalendarGrid = document.getElementById('shifts-calendar-grid');
+const shiftsWeekLabel = document.getElementById('shifts-week-label');
 const shiftModalBackdrop = document.getElementById('shift-modal-backdrop');
 const shiftForm = document.getElementById('shift-form');
 const shiftMessage = document.getElementById('shift-message');
 const shiftEmployeeSelect = document.getElementById('shift-employee');
 const shiftFormSubmit = document.getElementById('shift-form-submit');
 const shiftDeleteBtn = document.getElementById('shift-delete-btn');
+const shiftRecurringField = document.getElementById('shift-recurring-field');
+const shiftRecurringCheckbox = document.getElementById('shift-recurring');
+const shiftRecurrenceFields = document.getElementById('shift-recurrence-fields');
+const shiftRecurringUntil = document.getElementById('shift-recurring-until');
+
+function getMonday(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function toDateInputValue(date) {
+  return date.toISOString().slice(0, 10);
+}
 
 async function loadShifts() {
   const params = new URLSearchParams();
@@ -955,6 +978,7 @@ async function loadShifts() {
   shifts = await res.json();
   renderShiftsStats();
   renderShiftsTable();
+  if (currentShiftsView === 'calendar') renderShiftsCalendar();
 }
 
 function renderShiftsStats() {
@@ -996,6 +1020,72 @@ function renderShiftsTable() {
   }
 }
 
+const WEEKDAY_HEADERS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+
+function renderShiftsCalendar() {
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(currentShiftsWeekStart);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+
+  const rangeStart = days[0].toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
+  const rangeEnd = days[6].toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' });
+  shiftsWeekLabel.textContent = `${rangeStart} – ${rangeEnd}`;
+
+  const todayStr = toDateInputValue(new Date());
+  const filtered = getFilteredShifts();
+
+  shiftsCalendarGrid.innerHTML = days.map((d, i) => {
+    const dateStr = toDateInputValue(d);
+    const dayShifts = filtered
+      .filter((s) => s.shift_date === dateStr)
+      .sort((a, b) => a.start_time.localeCompare(b.start_time));
+    const isToday = dateStr === todayStr;
+
+    const chips = dayShifts.length === 0
+      ? '<div class="calendar-day-empty">Sin turnos</div>'
+      : dayShifts.map((s) => `
+          <div class="calendar-shift-chip" data-shift-id="${s.id}">
+            <span class="calendar-shift-time">${s.start_time}–${s.end_time}</span>
+            <span>${escapeHtml(s.employee_name)}</span>
+          </div>
+        `).join('');
+
+    return `
+      <div class="calendar-day${isToday ? ' is-today' : ''}">
+        <div class="calendar-day-header">${WEEKDAY_HEADERS[i]} ${d.getDate()}</div>
+        ${chips}
+      </div>
+    `;
+  }).join('');
+
+  shiftsCalendarGrid.querySelectorAll('[data-shift-id]').forEach((chip) => {
+    chip.addEventListener('click', () => openShiftModal(Number(chip.dataset.shiftId)));
+  });
+}
+
+document.querySelectorAll('.shifts-view-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.shifts-view-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentShiftsView = btn.dataset.view;
+    shiftsListView.style.display = currentShiftsView === 'list' ? 'block' : 'none';
+    shiftsCalendarView.style.display = currentShiftsView === 'calendar' ? 'block' : 'none';
+    if (currentShiftsView === 'calendar') renderShiftsCalendar();
+  });
+});
+
+document.getElementById('shifts-week-prev').addEventListener('click', () => {
+  currentShiftsWeekStart.setDate(currentShiftsWeekStart.getDate() - 7);
+  renderShiftsCalendar();
+});
+
+document.getElementById('shifts-week-next').addEventListener('click', () => {
+  currentShiftsWeekStart.setDate(currentShiftsWeekStart.getDate() + 7);
+  renderShiftsCalendar();
+});
+
 function populateShiftEmployeeSelect() {
   const list = currentShiftsDeptFilter ? employees.filter((e) => e.department === currentShiftsDeptFilter) : employees;
   shiftEmployeeSelect.innerHTML = list.filter((e) => e.active).map((e) => (
@@ -1012,6 +1102,8 @@ function openNewShiftModal() {
   shiftFormSubmit.textContent = 'Crear turno';
   shiftDeleteBtn.style.display = 'none';
   shiftEmployeeSelect.disabled = false;
+  shiftRecurringField.style.display = 'flex';
+  shiftRecurrenceFields.style.display = 'none';
   populateShiftEmployeeSelect();
   shiftModalBackdrop.classList.add('open');
 }
@@ -1026,6 +1118,8 @@ function openShiftModal(id) {
   document.getElementById('shift-modal-title').textContent = 'Editar turno';
   shiftFormSubmit.textContent = 'Guardar cambios';
   shiftDeleteBtn.style.display = 'inline-flex';
+  shiftRecurringField.style.display = 'none';
+  shiftRecurrenceFields.style.display = 'none';
   populateShiftEmployeeSelect();
 
   shiftEmployeeSelect.value = s.employee_id;
@@ -1044,34 +1138,98 @@ function closeShiftModal() {
   currentShiftId = null;
 }
 
+shiftRecurringCheckbox.addEventListener('change', () => {
+  shiftRecurrenceFields.style.display = shiftRecurringCheckbox.checked ? 'block' : 'none';
+});
+
+// Junta la fecha base con todas las fechas del rango [fecha base, hasta]
+// cuyo día de semana esté tildado, sin duplicar la fecha base.
+function buildRecurringDates(baseDate, weekdayValues, until) {
+  const dates = new Set([baseDate]);
+  if (weekdayValues.length && until) {
+    const cursor = new Date(`${baseDate}T00:00:00`);
+    const end = new Date(`${until}T00:00:00`);
+    while (cursor <= end) {
+      if (weekdayValues.includes(String(cursor.getDay()))) {
+        dates.add(toDateInputValue(cursor));
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  }
+  return Array.from(dates).sort();
+}
+
+async function createShift(body) {
+  const res = await fetch('/api/shifts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  return { ok: res.ok, data };
+}
+
 shiftForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   shiftMessage.className = 'message';
   shiftMessage.textContent = '';
 
-  const body = {
+  const baseBody = {
     employeeId: Number(shiftEmployeeSelect.value),
-    shiftDate: document.getElementById('shift-date').value,
     startTime: document.getElementById('shift-start').value,
     endTime: document.getElementById('shift-end').value,
     notes: document.getElementById('shift-notes').value.trim(),
   };
+  const shiftDate = document.getElementById('shift-date').value;
 
   const submitBtn = shiftFormSubmit;
   submitBtn.disabled = true;
   try {
     const isEdit = !!currentShiftId;
-    const url = isEdit ? `/api/shifts/${currentShiftId}` : '/api/shifts';
-    const method = isEdit ? 'PATCH' : 'POST';
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el turno');
 
-    showToast(isEdit ? 'Turno actualizado.' : 'Turno creado.');
+    if (isEdit) {
+      const res = await fetch(`/api/shifts/${currentShiftId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...baseBody, shiftDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'No se pudo guardar el turno');
+      showToast('Turno actualizado.');
+      closeShiftModal();
+      await loadShifts();
+      return;
+    }
+
+    const isRecurring = shiftRecurringCheckbox.checked;
+    const weekdayValues = isRecurring
+      ? Array.from(document.querySelectorAll('#shift-recurrence-fields input[type="checkbox"]:checked')).map((c) => c.value)
+      : [];
+    const dates = isRecurring
+      ? buildRecurringDates(shiftDate, weekdayValues, shiftRecurringUntil.value)
+      : [shiftDate];
+
+    let created = 0;
+    const conflicts = [];
+    for (const date of dates) {
+      const { ok, data } = await createShift({ ...baseBody, shiftDate: date });
+      if (ok) {
+        created += 1;
+      } else if (data.error === 'overlap') {
+        conflicts.push(date);
+      } else {
+        throw new Error(data.error || 'No se pudo guardar el turno');
+      }
+    }
+
+    if (created === 0) {
+      throw new Error('No se pudo crear ningún turno: todas las fechas se superponen con turnos existentes.');
+    }
+
+    const summary = conflicts.length
+      ? `Se crearon ${created} turno${created === 1 ? '' : 's'}. Se omitieron ${conflicts.length} por superposición: ${conflicts.join(', ')}.`
+      : `Se ${created === 1 ? 'creó' : `crearon ${created}`} turno${created === 1 ? '' : 's'}.`;
+    showToast(summary, conflicts.length ? 'danger' : 'ok');
     closeShiftModal();
     await loadShifts();
   } catch (err) {
@@ -1100,6 +1258,7 @@ shiftModalBackdrop.addEventListener('click', (e) => {
 document.getElementById('shifts-search-input').addEventListener('input', (e) => {
   currentShiftsSearch = e.target.value.trim();
   renderShiftsTable();
+  if (currentShiftsView === 'calendar') renderShiftsCalendar();
 });
 
 document.querySelectorAll('.shifts-dept-filter-btn').forEach((btn) => {
@@ -1139,12 +1298,44 @@ async function loadInventory() {
   if (res.status === 401) { window.location.href = '/login.html'; return; }
   inventoryItems = await res.json();
   renderInventoryStats();
+  renderLowStockBanner();
   renderInventoryTable();
+}
+
+const INVENTORY_CATEGORIES = {
+  sams: ['Medicamentos', 'Material de curación', 'Equipamiento médico', 'Oxígeno y respiración', 'Diagnóstico', 'Otros'],
+  safd: ['Equipo contra incendios', 'Rescate y extracción', 'Protección personal', 'Herramientas', 'Comunicaciones', 'Otros'],
+};
+
+function populateInventoryCategorySelect(department, selected) {
+  const select = document.getElementById('inventory-category');
+  const list = INVENTORY_CATEGORIES[department] || INVENTORY_CATEGORIES.sams;
+  select.innerHTML = list.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  if (selected && !list.includes(selected)) {
+    const opt = document.createElement('option');
+    opt.value = selected;
+    opt.textContent = selected;
+    select.appendChild(opt);
+  }
+  select.value = selected || list[0];
 }
 
 function renderInventoryStats() {
   document.getElementById('istat-total').textContent = inventoryItems.length;
   document.getElementById('istat-low').textContent = inventoryItems.filter((i) => i.quantity <= i.min_quantity).length;
+}
+
+function renderLowStockBanner() {
+  const banner = document.getElementById('inventory-low-banner');
+  const lowItems = inventoryItems.filter((i) => i.quantity <= i.min_quantity);
+  if (lowItems.length === 0) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+  banner.style.display = 'block';
+  const names = lowItems.map((i) => `<strong>${escapeHtml(i.name)}</strong> (${i.quantity}/${i.min_quantity} ${escapeHtml(i.unit)})`).join(', ');
+  banner.innerHTML = `⚠️ ${lowItems.length === 1 ? 'Hay un insumo' : `Hay ${lowItems.length} insumos`} con stock en o por debajo del mínimo: ${names}.`;
 }
 
 function getFilteredInventory() {
@@ -1212,9 +1403,14 @@ function openNewInventoryModal() {
 
   const initialDept = scopedDepartment || currentInventoryDeptFilter || 'sams';
   inventoryDepartmentSelect.value = initialDept;
+  populateInventoryCategorySelect(initialDept);
 
   inventoryModalBackdrop.classList.add('open');
 }
+
+inventoryDepartmentSelect.addEventListener('change', () => {
+  populateInventoryCategorySelect(inventoryDepartmentSelect.value);
+});
 
 async function openInventoryModal(id) {
   const item = inventoryItems.find((x) => x.id === id);
@@ -1231,7 +1427,7 @@ async function openInventoryModal(id) {
   inventoryDepartmentField.style.display = 'none';
 
   document.getElementById('inventory-name').value = item.name;
-  document.getElementById('inventory-category').value = item.category || '';
+  populateInventoryCategorySelect(item.department, item.category);
   document.getElementById('inventory-unit').value = item.unit;
   document.getElementById('inventory-min').value = item.min_quantity;
 
@@ -1354,7 +1550,11 @@ document.getElementById('movement-add-btn').addEventListener('click', async () =
     await loadInventory();
     const item = inventoryItems.find((x) => x.id === currentInventoryId);
     if (item) document.getElementById('inventory-modal-status').innerHTML = inventoryStatusBadges(item);
-    showToast('Movimiento registrado.');
+    if (data.justWentLow) {
+      showToast(`⚠️ ${item ? item.name : 'El insumo'} entró en stock bajo.`, 'danger');
+    } else {
+      showToast('Movimiento registrado.');
+    }
   } catch (err) {
     movementMessage.className = 'message error';
     movementMessage.textContent = err.message;
@@ -1387,6 +1587,8 @@ let cases = [];
 let currentCasesDeptFilter = '';
 let currentCasesStatusFilter = '';
 let currentCasesSearch = '';
+let currentCasesFrom = '';
+let currentCasesTo = '';
 let currentCaseId = null;
 
 const casesTableBody = document.getElementById('cases-table-body');
@@ -1401,11 +1603,19 @@ const caseDeleteBtn = document.getElementById('case-delete-btn');
 const caseResponsibleSelect = document.getElementById('case-responsible');
 const caseStatusField = document.getElementById('case-status-field');
 const caseStatusSelect = document.getElementById('case-status');
+const caseInventorySection = document.getElementById('case-inventory-section');
+const caseItemSelect = document.getElementById('case-item-select');
+const caseItemMessage = document.getElementById('case-item-message');
+const caseItemUsageList = document.getElementById('case-item-usage-list');
+const caseHistorySection = document.getElementById('case-history-section');
+const caseHistoryList = document.getElementById('case-history-list');
 
 async function loadCases() {
   const params = new URLSearchParams();
   if (currentCasesDeptFilter) params.set('department', currentCasesDeptFilter);
   if (currentCasesStatusFilter) params.set('status', currentCasesStatusFilter);
+  if (currentCasesFrom) params.set('from', currentCasesFrom);
+  if (currentCasesTo) params.set('to', currentCasesTo);
   const query = params.toString();
   const res = await fetch(query ? `/api/cases?${query}` : '/api/cases');
   if (res.status === 401) { window.location.href = '/login.html'; return; }
@@ -1487,6 +1697,8 @@ async function openNewCaseModal() {
   caseDeleteBtn.style.display = 'none';
   caseDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
   caseStatusField.style.display = 'none';
+  caseInventorySection.style.display = 'none';
+  caseHistorySection.style.display = 'none';
 
   const initialDept = scopedDepartment || currentCasesDeptFilter || 'sams';
   caseDepartmentSelect.value = initialDept;
@@ -1523,7 +1735,115 @@ async function openCaseModal(id) {
   caseResponsibleSelect.value = c.responsible_employee_id || '';
   caseStatusSelect.value = c.status;
 
+  caseInventorySection.style.display = 'block';
+  caseHistorySection.style.display = 'block';
+  caseItemMessage.className = 'message';
+  caseItemMessage.textContent = '';
+  caseItemUsageList.innerHTML = '<div class="staff-empty">Cargando…</div>';
+  caseHistoryList.innerHTML = '<div class="staff-empty">Cargando…</div>';
+
   caseModalBackdrop.classList.add('open');
+
+  await Promise.all([
+    loadCaseItemOptions(c.department),
+    loadCaseItemUsage(id),
+    loadCaseHistory(c),
+  ]);
+}
+
+async function loadCaseItemOptions(department) {
+  const res = await fetch(`/api/inventory?department=${department}`);
+  if (!res.ok) return;
+  const items = await res.json();
+  caseItemSelect.innerHTML = items.length === 0
+    ? '<option value="">No hay insumos cargados para este departamento</option>'
+    : items.map((i) => `<option value="${i.id}">${escapeHtml(i.name)} (${i.quantity} ${escapeHtml(i.unit)} disponibles)</option>`).join('');
+}
+
+async function loadCaseItemUsage(caseId) {
+  const res = await fetch(`/api/cases/${caseId}/movements`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  renderCaseItemUsage(rows);
+}
+
+function renderCaseItemUsage(rows) {
+  if (rows.length === 0) {
+    caseItemUsageList.innerHTML = '<div class="staff-empty">Todavía no se descontaron insumos para esta atención.</div>';
+    return;
+  }
+  caseItemUsageList.innerHTML = rows.map((m) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="status-pill status-rechazado">-${m.quantity}</span>
+        <span class="staff-username">${escapeHtml(m.item_name)}</span>
+      </div>
+      <span class="muted-link">${formatDate(m.created_at)}</span>
+    </div>
+  `).join('');
+}
+
+document.getElementById('case-item-add-btn').addEventListener('click', async () => {
+  if (!currentCaseId) return;
+  const itemId = caseItemSelect.value;
+  const quantity = Number(document.getElementById('case-item-qty').value);
+  const c = cases.find((x) => x.id === currentCaseId);
+
+  caseItemMessage.className = 'message';
+  caseItemMessage.textContent = '';
+
+  if (!itemId || !Number.isFinite(quantity) || quantity <= 0) {
+    caseItemMessage.className = 'message error';
+    caseItemMessage.textContent = 'Elegí un insumo y una cantidad válida.';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/inventory/${itemId}/movements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'salida',
+        quantity,
+        reason: `Atención #${currentCaseId} — ${c ? c.subject_name : ''}`,
+        caseId: currentCaseId,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo descontar el insumo');
+
+    document.getElementById('case-item-qty').value = '';
+    await loadCaseItemUsage(currentCaseId);
+    if (c) await loadCaseItemOptions(c.department);
+    showToast(data.justWentLow ? '⚠️ Insumo descontado. Entró en stock bajo.' : 'Insumo descontado del inventario.', data.justWentLow ? 'danger' : 'ok');
+  } catch (err) {
+    caseItemMessage.className = 'message error';
+    caseItemMessage.textContent = err.message;
+  }
+});
+
+async function loadCaseHistory(c) {
+  const params = new URLSearchParams({ subject: c.subject_name, department: c.department });
+  const res = await fetch(`/api/cases?${params.toString()}`);
+  if (!res.ok) return;
+  const rows = (await res.json()).filter((x) => x.id !== c.id);
+  renderCaseHistory(rows);
+}
+
+function renderCaseHistory(rows) {
+  if (rows.length === 0) {
+    caseHistoryList.innerHTML = '<div class="staff-empty">No se encontraron atenciones anteriores de este paciente.</div>';
+    return;
+  }
+  caseHistoryList.innerHTML = rows.map((c) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="status-pill ${c.status === 'abierta' ? 'status-pendiente' : 'status-aprobado'}">${c.status === 'abierta' ? 'Abierta' : 'Cerrada'}</span>
+        <span class="staff-username">${escapeHtml(c.summary.slice(0, 80))}${c.summary.length > 80 ? '…' : ''}</span>
+      </div>
+      <span class="muted-link">${formatDate(c.created_at)}</span>
+    </div>
+  `).join('');
 }
 
 function closeCaseModal() {
@@ -1597,6 +1917,24 @@ caseModalBackdrop.addEventListener('click', (e) => {
 document.getElementById('cases-search-input').addEventListener('input', (e) => {
   currentCasesSearch = e.target.value.trim();
   renderCasesTable();
+});
+
+document.getElementById('cases-from-input').addEventListener('change', (e) => {
+  currentCasesFrom = e.target.value;
+  loadCases();
+});
+
+document.getElementById('cases-to-input').addEventListener('change', (e) => {
+  currentCasesTo = e.target.value;
+  loadCases();
+});
+
+document.getElementById('cases-date-clear-btn').addEventListener('click', () => {
+  currentCasesFrom = '';
+  currentCasesTo = '';
+  document.getElementById('cases-from-input').value = '';
+  document.getElementById('cases-to-input').value = '';
+  loadCases();
 });
 
 document.querySelectorAll('.cases-dept-filter-btn').forEach((btn) => {

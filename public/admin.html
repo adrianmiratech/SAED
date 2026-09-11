@@ -195,29 +195,42 @@
               <button class="btn shifts-dept-filter-btn" data-department="safd">SAFD</button>
             </div>
             <div class="toolbar">
+              <button class="btn shifts-view-btn active" data-view="list">Lista</button>
+              <button class="btn shifts-view-btn" data-view="calendar">Calendario</button>
               <input type="text" id="shifts-search-input" class="search-input" placeholder="Buscar por empleado..." />
               <span style="flex:1"></span>
               <button id="new-shift-btn" class="btn-primary btn-sm">+ Nuevo turno</button>
             </div>
 
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Horario</th>
-                    <th>Empleado</th>
-                    <th>Departamento</th>
-                    <th>Notas</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="shifts-table-body"></tbody>
-              </table>
-              <div id="shifts-empty" class="empty-state" style="display:none">
-                <div class="empty-icon">🕒</div>
-                <p>No hay turnos cargados en esta categoría.</p>
+            <div id="shifts-list-view">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Horario</th>
+                      <th>Empleado</th>
+                      <th>Departamento</th>
+                      <th>Notas</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="shifts-table-body"></tbody>
+                </table>
+                <div id="shifts-empty" class="empty-state" style="display:none">
+                  <div class="empty-icon">🕒</div>
+                  <p>No hay turnos cargados en esta categoría.</p>
+                </div>
               </div>
+            </div>
+
+            <div id="shifts-calendar-view" style="display:none">
+              <div class="toolbar">
+                <button id="shifts-week-prev" class="btn btn-ghost btn-sm">‹ Semana anterior</button>
+                <span id="shifts-week-label" class="calendar-week-label"></span>
+                <button id="shifts-week-next" class="btn btn-ghost btn-sm">Semana siguiente ›</button>
+              </div>
+              <div class="calendar-week" id="shifts-calendar-grid"></div>
             </div>
           </div>
         </div>
@@ -235,6 +248,8 @@
           </div>
 
           <div class="card">
+            <div id="inventory-low-banner" class="low-stock-banner" style="display:none"></div>
+
             <div class="toolbar" id="inventory-dept-filter-row">
               <button class="btn inventory-dept-filter-btn active" data-department="">Todos los departamentos</button>
               <button class="btn inventory-dept-filter-btn" data-department="sams">SAMS</button>
@@ -298,6 +313,13 @@
               <span style="flex:1"></span>
               <input type="text" id="cases-search-input" class="search-input" placeholder="Buscar por nombre..." />
               <button id="new-case-btn" class="btn-primary btn-sm">+ Nueva atención</button>
+            </div>
+            <div class="toolbar">
+              <label class="date-range-label" for="cases-from-input">Desde</label>
+              <input type="date" id="cases-from-input" />
+              <label class="date-range-label" for="cases-to-input">Hasta</label>
+              <input type="date" id="cases-to-input" />
+              <button id="cases-date-clear-btn" class="btn btn-ghost btn-sm">Limpiar fechas</button>
             </div>
 
             <div class="table-wrap">
@@ -542,6 +564,24 @@
         <label for="shift-notes">Notas <span class="hint">(opcional)</span></label>
         <textarea id="shift-notes" placeholder="Ej: Cobertura zona norte"></textarea>
 
+        <label class="active-check-label" for="shift-recurring" id="shift-recurring-field">
+          <input type="checkbox" id="shift-recurring" style="width:auto" /> Repetir este turno en más días
+        </label>
+        <div id="shift-recurrence-fields" style="display:none">
+          <label>Repetir los días</label>
+          <div class="radio-group weekday-check-group">
+            <label><input type="checkbox" value="1" /> Lun</label>
+            <label><input type="checkbox" value="2" /> Mar</label>
+            <label><input type="checkbox" value="3" /> Mié</label>
+            <label><input type="checkbox" value="4" /> Jue</label>
+            <label><input type="checkbox" value="5" /> Vie</label>
+            <label><input type="checkbox" value="6" /> Sáb</label>
+            <label><input type="checkbox" value="0" /> Dom</label>
+          </div>
+          <label for="shift-recurring-until">Repetir hasta (inclusive)</label>
+          <input type="date" id="shift-recurring-until" />
+        </div>
+
         <div class="submit-row">
           <button type="submit" class="btn-primary" id="shift-form-submit">Crear turno</button>
         </div>
@@ -572,8 +612,8 @@
             <input type="text" id="inventory-name" required />
           </div>
           <div>
-            <label for="inventory-category">Categoría <span class="hint">(opcional)</span></label>
-            <input type="text" id="inventory-category" placeholder="Ej: Medicamentos" />
+            <label for="inventory-category">Categoría</label>
+            <select id="inventory-category"></select>
           </div>
         </div>
 
@@ -693,6 +733,30 @@
         </div>
         <div id="case-message" class="message"></div>
       </form>
+
+      <div id="case-inventory-section" style="display:none">
+        <h3 class="modal-section-title">Insumos utilizados</h3>
+        <div class="row">
+          <div>
+            <label for="case-item-select">Insumo</label>
+            <select id="case-item-select"></select>
+          </div>
+          <div>
+            <label for="case-item-qty">Cantidad</label>
+            <input type="number" id="case-item-qty" min="0" step="1" />
+          </div>
+        </div>
+        <div class="submit-row">
+          <button type="button" id="case-item-add-btn" class="btn-primary btn-sm">Descontar del inventario</button>
+        </div>
+        <div id="case-item-message" class="message"></div>
+        <div id="case-item-usage-list" class="staff-list"></div>
+      </div>
+
+      <div id="case-history-section" style="display:none">
+        <h3 class="modal-section-title">Atenciones anteriores de este paciente</h3>
+        <div id="case-history-list" class="staff-list"></div>
+      </div>
 
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="case-modal-close">Cerrar</button>

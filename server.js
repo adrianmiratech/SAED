@@ -654,6 +654,19 @@ app.get('/api/shifts', requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+// Dos horarios "HH:MM" en el mismo día se superponen si arranca uno
+// antes de que termine el otro y viceversa. Al estar en formato de 24hs
+// con cero a la izquierda, la comparación de strings ya da el orden
+// cronológico correcto sin necesidad de parsear a Date.
+async function hasShiftOverlap(employeeId, shiftDate, startTime, endTime, excludeId) {
+  const rows = await db.prepare(
+    'SELECT id, start_time, end_time FROM shifts WHERE employee_id = ? AND shift_date = ?',
+  ).all(employeeId, shiftDate);
+  return rows.some((r) => (
+    (!excludeId || r.id !== Number(excludeId)) && startTime < r.end_time && r.start_time < endTime
+  ));
+}
+
 app.post('/api/shifts', requireAuth, async (req, res) => {
   const { employeeId, shiftDate, startTime, endTime, notes } = req.body || {};
   if (!employeeId || !shiftDate || !startTime || !endTime) {
@@ -662,6 +675,10 @@ app.post('/api/shifts', requireAuth, async (req, res) => {
 
   const employee = await getEmployeeWithAccess(req, res, employeeId);
   if (!employee) return;
+
+  if (await hasShiftOverlap(employee.id, shiftDate, startTime, endTime)) {
+    return res.status(409).json({ error: 'overlap', message: `${employee.full_name} ya tiene un turno asignado el ${shiftDate} que se superpone con ese horario` });
+  }
 
   const info = await db.prepare(`
     INSERT INTO shifts (employee_id, department, shift_date, start_time, end_time, notes, created_by)
@@ -677,13 +694,21 @@ app.patch('/api/shifts/:id', requireAuth, async (req, res) => {
   if (!requireDepartmentAccess(req, res, row)) return;
 
   const { shiftDate, startTime, endTime, notes } = req.body || {};
+  const nextDate = shiftDate || row.shift_date;
+  const nextStart = startTime || row.start_time;
+  const nextEnd = endTime || row.end_time;
+
+  if (await hasShiftOverlap(row.employee_id, nextDate, nextStart, nextEnd, row.id)) {
+    return res.status(409).json({ error: 'overlap', message: 'Ese horario se superpone con otro turno ya asignado a este empleado' });
+  }
+
   await db.prepare(`
     UPDATE shifts SET shift_date = ?, start_time = ?, end_time = ?, notes = ?
     WHERE id = ?
   `).run(
-    shiftDate || row.shift_date,
-    startTime || row.start_time,
-    endTime || row.end_time,
+    nextDate,
+    nextStart,
+    nextEnd,
     notes !== undefined ? ((notes || '').trim() || null) : row.notes,
     req.params.id,
   );
@@ -793,10 +818,19 @@ app.post('/api/inventory/:id/movements', requireAuth, async (req, res) => {
   const item = await getInventoryItemWithAccess(req, res, req.params.id);
   if (!item) return;
 
-  const { type, quantity, reason } = req.body || {};
+  const { type, quantity, reason, caseId } = req.body || {};
   const qty = Number(quantity);
   if (!VALID_MOVEMENT_TYPES.includes(type) || !Number.isFinite(qty) || qty <= 0) {
     return res.status(400).json({ error: 'Tipo de movimiento y cantidad (mayor a 0) son requeridos' });
+  }
+
+  let linkedCaseId = null;
+  if (caseId) {
+    const caseRow = await db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId);
+    if (!caseRow || caseRow.department !== item.department) {
+      return res.status(400).json({ error: 'Atención inválida para ese departamento' });
+    }
+    linkedCaseId = caseRow.id;
   }
 
   const newQuantity = type === 'entrada' ? item.quantity + qty : item.quantity - qty;
@@ -804,20 +838,23 @@ app.post('/api/inventory/:id/movements', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'No hay suficiente stock para esa salida' });
   }
 
+  const wasLow = item.quantity <= item.min_quantity;
+  const isLow = newQuantity <= item.min_quantity;
+
   await db.prepare(`
-    INSERT INTO inventory_movements (item_id, type, quantity, reason, created_by)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(item.id, type, qty, (reason || '').trim() || null, req.session.adminUser);
+    INSERT INTO inventory_movements (item_id, type, quantity, reason, case_id, created_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(item.id, type, qty, (reason || '').trim() || null, linkedCaseId, req.session.adminUser);
 
   await db.prepare(`UPDATE inventory_items SET quantity = ?, updated_at = datetime('now') WHERE id = ?`).run(newQuantity, item.id);
 
-  res.status(201).json({ ok: true, quantity: newQuantity });
+  res.status(201).json({ ok: true, quantity: newQuantity, justWentLow: isLow && !wasLow });
 });
 
 // ---------- Atenciones (fichas clínicas / informes de intervención) ----------
 
 app.get('/api/cases', requireAuth, async (req, res) => {
-  const { department, status } = req.query;
+  const { department, status, from, to, subject } = req.query;
   const scopedDept = req.session.adminDepartment;
   const conditions = [];
   const params = [];
@@ -832,6 +869,18 @@ app.get('/api/cases', requireAuth, async (req, res) => {
   if (status && VALID_CASE_STATUSES.includes(status)) {
     conditions.push('c.status = ?');
     params.push(status);
+  }
+  if (from) {
+    conditions.push("c.created_at >= ?");
+    params.push(`${from} 00:00:00`);
+  }
+  if (to) {
+    conditions.push("c.created_at <= ?");
+    params.push(`${to} 23:59:59`);
+  }
+  if (subject) {
+    conditions.push('c.subject_name LIKE ?');
+    params.push(`%${subject}%`);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -924,8 +973,26 @@ app.delete('/api/cases/:id', requireAuth, async (req, res) => {
   if (!row) return res.status(404).json({ error: 'No encontrada' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
+  await db.prepare('DELETE FROM inventory_movements WHERE case_id = ?').run(req.params.id);
   await db.prepare('DELETE FROM cases WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// Insumos que se descontaron del inventario para una atención puntual
+// (movimientos de inventory_movements vinculados por case_id).
+app.get('/api/cases/:id/movements', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM cases WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  const rows = await db.prepare(`
+    SELECT m.*, i.name AS item_name, i.unit AS item_unit
+    FROM inventory_movements m
+    JOIN inventory_items i ON i.id = m.item_id
+    WHERE m.case_id = ?
+    ORDER BY m.created_at DESC
+  `).all(req.params.id);
+  res.json(rows);
 });
 
 if (require.main === module) {

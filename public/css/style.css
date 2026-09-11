@@ -472,6 +472,7 @@ button:disabled, .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: n
 .tab-btn,
 .personal-dept-filter-btn,
 .shifts-dept-filter-btn,
+.shifts-view-btn,
 .inventory-dept-filter-btn,
 .cases-dept-filter-btn,
 .cases-status-filter-btn {
@@ -484,12 +485,104 @@ button:disabled, .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: n
 .tab-btn.active,
 .personal-dept-filter-btn.active,
 .shifts-dept-filter-btn.active,
+.shifts-view-btn.active,
 .inventory-dept-filter-btn.active,
 .cases-dept-filter-btn.active,
 .cases-status-filter-btn.active {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
+}
+
+.date-range-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+input[type="date"]#cases-from-input,
+input[type="date"]#cases-to-input {
+  width: auto;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.weekday-check-group {
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.low-stock-banner {
+  background: var(--danger-bg);
+  border: 1px solid rgba(229, 72, 77, 0.4);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.low-stock-banner strong { color: var(--danger); }
+
+.calendar-week-label {
+  font-weight: 700;
+  font-size: 13.5px;
+  flex: 1;
+  text-align: center;
+}
+
+.calendar-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(130px, 1fr));
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.calendar-day {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  min-height: 130px;
+}
+
+.calendar-day.is-today {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.calendar-day-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.calendar-day.is-today .calendar-day-header { color: var(--accent); }
+
+.calendar-shift-chip {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.calendar-shift-chip:hover { border-color: var(--accent); }
+
+.calendar-shift-time {
+  font-weight: 700;
+  display: block;
+}
+
+.calendar-day-empty {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .active-check-label {

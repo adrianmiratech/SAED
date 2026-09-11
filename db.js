@@ -143,6 +143,7 @@ async function setup() {
       type TEXT NOT NULL,
       quantity REAL NOT NULL,
       reason TEXT,
+      case_id INTEGER REFERENCES cases(id),
       created_by TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
