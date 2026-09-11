@@ -57,6 +57,7 @@ const VALID_DEPARTMENTS = ['sams', 'safd'];
 const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 const VALID_CASE_STATUSES = ['abierta', 'cerrada'];
 const VALID_MOVEMENT_TYPES = ['entrada', 'salida'];
+const VALID_CADET_STATUSES = ['activo', 'graduado', 'expulsado', 'baja'];
 
 function csvEscape(value) {
   const s = String(value ?? '');
@@ -71,7 +72,8 @@ async function computeGrants(employeeId) {
     SELECT
       MAX(r.grants_staff) AS staff,
       MAX(r.grants_superadmin) AS superadmin,
-      MAX(r.grants_hr_access) AS hr
+      MAX(r.grants_hr_access) AS hr,
+      MAX(r.grants_academy_access) AS academy
     FROM employee_role_links l
     JOIN employee_roles r ON r.id = l.role_id
     WHERE l.employee_id = ?
@@ -80,6 +82,7 @@ async function computeGrants(employeeId) {
     isStaff: !!(row && row.staff),
     isSuperadmin: !!(row && row.superadmin),
     hrAccess: !!(row && row.hr),
+    academyAccess: !!(row && row.academy),
   };
 }
 
@@ -102,6 +105,7 @@ function sessionSnapshot(req) {
     isStaff: !!(req.session?.isStaff),
     isSuperadmin: !!(req.session?.isSuperadmin),
     hrAccess: !!(req.session?.hrAccess),
+    academyAccess: !!(req.session?.academyAccess),
   };
 }
 
@@ -130,6 +134,7 @@ app.post('/api/login', async (req, res) => {
   req.session.isStaff = grants.isStaff;
   req.session.isSuperadmin = grants.isSuperadmin;
   req.session.hrAccess = grants.hrAccess;
+  req.session.academyAccess = grants.academyAccess;
 
   res.json({ ok: true, ...sessionSnapshot(req) });
 });
@@ -849,6 +854,14 @@ function requireAttendanceAccess(req, res, next) {
   return res.status(403).json({ error: 'No autorizado' });
 }
 
+// La Academia (cadetes, cursos, evaluaciones) la administra la división
+// RTD (o el superadmin); el resto del staff no ve estos datos aunque
+// tenga acceso a otros módulos de gestión.
+function requireAcademyAccess(req, res, next) {
+  if (req.session && req.session.employeeId && (req.session.isSuperadmin || req.session.academyAccess)) return next();
+  return res.status(403).json({ error: 'No autorizado' });
+}
+
 app.get('/api/attendance', requireAuth, requireAttendanceAccess, async (req, res) => {
   const { department, employeeId, from, to } = req.query;
   const scopedDept = scopedDepartment(req);
@@ -1180,9 +1193,351 @@ app.get('/api/cases/:id/movements', requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+// ---------- Academia (cadetes, cursos y evaluaciones, a cargo de RTD) ----------
+
+app.get('/api/cadets', requireAuth, requireAcademyAccess, async (req, res) => {
+  const { department, status, search } = req.query;
+  const scopedDept = scopedDepartment(req);
+  const conditions = [];
+  const params = [];
+
+  if (scopedDept) {
+    conditions.push('c.department = ?');
+    params.push(scopedDept);
+  } else if (department && VALID_DEPARTMENTS.includes(department)) {
+    conditions.push('c.department = ?');
+    params.push(department);
+  }
+  if (status && VALID_CADET_STATUSES.includes(status)) {
+    conditions.push('c.status = ?');
+    params.push(status);
+  }
+  if (search) {
+    conditions.push('c.full_name LIKE ?');
+    params.push(`%${search}%`);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = await db.prepare(`
+    SELECT c.*, e.full_name AS employee_name
+    FROM cadets c
+    LEFT JOIN employees e ON e.id = c.employee_id
+    ${where}
+    ORDER BY c.created_at DESC
+  `).all(...params);
+  res.json(rows);
+});
+
+app.post('/api/cadets', requireAuth, requireAcademyAccess, async (req, res) => {
+  const { fullName, phone, discordInfo, notes } = req.body || {};
+  const scopedDept = scopedDepartment(req);
+  const department = scopedDept || req.body?.department;
+
+  if (!fullName || !department) {
+    return res.status(400).json({ error: 'Nombre y departamento son requeridos' });
+  }
+  if (!VALID_DEPARTMENTS.includes(department)) {
+    return res.status(400).json({ error: 'Departamento inválido' });
+  }
+
+  const info = await db.prepare(`
+    INSERT INTO cadets (full_name, phone, discord_info, department, notes, created_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    fullName.trim(), (phone || '').trim() || null, (discordInfo || '').trim() || null,
+    department, (notes || '').trim() || null, req.session.username,
+  );
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+async function getCadetWithAccess(req, res, id) {
+  const row = await db.prepare('SELECT * FROM cadets WHERE id = ?').get(id);
+  if (!row) {
+    res.status(404).json({ error: 'Cadete no encontrado' });
+    return null;
+  }
+  if (!requireDepartmentAccess(req, res, row)) return null;
+  return row;
+}
+
+app.patch('/api/cadets/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCadetWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  const { fullName, phone, discordInfo, notes, status } = req.body || {};
+  if (status && !VALID_CADET_STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'Estado inválido' });
+  }
+  const nextStatus = status || row.status;
+
+  await db.prepare(`
+    UPDATE cadets
+    SET full_name = ?, phone = ?, discord_info = ?, notes = ?, status = ?,
+        graduated_at = CASE WHEN ? = 'graduado' AND status != 'graduado' THEN datetime('now') ELSE graduated_at END
+    WHERE id = ?
+  `).run(
+    fullName !== undefined ? fullName.trim() : row.full_name,
+    phone !== undefined ? ((phone || '').trim() || null) : row.phone,
+    discordInfo !== undefined ? ((discordInfo || '').trim() || null) : row.discord_info,
+    notes !== undefined ? ((notes || '').trim() || null) : row.notes,
+    nextStatus,
+    nextStatus,
+    req.params.id,
+  );
+
+  res.json({ ok: true });
+});
+
+app.delete('/api/cadets/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCadetWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  await db.prepare('DELETE FROM academy_evaluations WHERE cadet_id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM cadet_notes WHERE cadet_id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM cadets WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Convierte al cadete en un empleado real (rango de entrada de su
+// departamento) sin borrar su historial de formación, que queda
+// vinculado vía cadets.employee_id.
+app.post('/api/cadets/:id/graduate', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCadetWithAccess(req, res, req.params.id);
+  if (!row) return;
+  if (row.employee_id) {
+    return res.status(400).json({ error: 'Este cadete ya tiene una cuenta de empleado vinculada' });
+  }
+
+  const entryRank = await db.prepare(
+    'SELECT id FROM ranks WHERE level = 1 AND department = ? ORDER BY id LIMIT 1',
+  ).get(row.department);
+  if (!entryRank) {
+    return res.status(400).json({ error: 'No hay un rango de entrada configurado para ese departamento' });
+  }
+
+  const info = await db.prepare(`
+    INSERT INTO employees (full_name, phone, discord_info, department, rank_id, active, created_by)
+    VALUES (?, ?, ?, ?, ?, 1, ?)
+  `).run(row.full_name, row.phone, row.discord_info, row.department, entryRank.id, req.session.username);
+
+  await db.prepare(`
+    UPDATE cadets SET status = 'graduado', graduated_at = COALESCE(graduated_at, datetime('now')), employee_id = ?
+    WHERE id = ?
+  `).run(info.lastInsertRowid, req.params.id);
+
+  res.status(201).json({ ok: true, employeeId: info.lastInsertRowid });
+});
+
+function courseDepartmentAllowed(req, res, courseDepartment) {
+  const scopedDept = scopedDepartment(req);
+  if (scopedDept && courseDepartment && courseDepartment !== scopedDept) {
+    res.status(404).json({ error: 'Curso no encontrado' });
+    return false;
+  }
+  return true;
+}
+
+app.get('/api/academy-courses', requireAuth, requireAcademyAccess, async (req, res) => {
+  const rows = await db.prepare('SELECT * FROM academy_courses ORDER BY name ASC').all();
+  const scopedDept = scopedDepartment(req);
+  const filtered = scopedDept ? rows.filter((r) => !r.department || r.department === scopedDept) : rows;
+  res.json(filtered);
+});
+
+app.post('/api/academy-courses', requireAuth, requireAcademyAccess, async (req, res) => {
+  const { name, department, description } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'El nombre es requerido' });
+  if (department && !VALID_DEPARTMENTS.includes(department)) {
+    return res.status(400).json({ error: 'Departamento inválido' });
+  }
+  const scopedDept = scopedDepartment(req);
+  const finalDepartment = scopedDept || department || null;
+
+  const info = await db.prepare(`
+    INSERT INTO academy_courses (name, department, description, created_by)
+    VALUES (?, ?, ?, ?)
+  `).run(name.trim(), finalDepartment, (description || '').trim() || null, req.session.username);
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+async function getCourseWithAccess(req, res, id) {
+  const row = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(id);
+  if (!row) {
+    res.status(404).json({ error: 'Curso no encontrado' });
+    return null;
+  }
+  if (!courseDepartmentAllowed(req, res, row.department)) return null;
+  return row;
+}
+
+app.patch('/api/academy-courses/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCourseWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  const { name, description, active } = req.body || {};
+  await db.prepare(`
+    UPDATE academy_courses SET name = ?, description = ?, active = ? WHERE id = ?
+  `).run(
+    name !== undefined ? name.trim() : row.name,
+    description !== undefined ? ((description || '').trim() || null) : row.description,
+    active !== undefined ? (active ? 1 : 0) : row.active,
+    req.params.id,
+  );
+
+  res.json({ ok: true });
+});
+
+app.delete('/api/academy-courses/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCourseWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  await db.prepare('DELETE FROM academy_classes WHERE course_id = ?').run(req.params.id);
+  await db.prepare('UPDATE academy_evaluations SET course_id = NULL WHERE course_id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM academy_courses WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/academy-courses/:id/classes', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCourseWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  const rows = await db.prepare(`
+    SELECT cl.*, e.full_name AS instructor_name
+    FROM academy_classes cl
+    LEFT JOIN employees e ON e.id = cl.instructor_employee_id
+    WHERE cl.course_id = ?
+    ORDER BY cl.scheduled_at ASC, cl.id ASC
+  `).all(req.params.id);
+  res.json(rows);
+});
+
+app.post('/api/academy-courses/:id/classes', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCourseWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  const { title, scheduledAt, instructorEmployeeId, notes } = req.body || {};
+  if (!title || !title.trim()) return res.status(400).json({ error: 'El título es requerido' });
+
+  let instructorId = null;
+  if (instructorEmployeeId) {
+    const employee = await db.prepare('SELECT id FROM employees WHERE id = ?').get(instructorEmployeeId);
+    if (!employee) return res.status(400).json({ error: 'Instructor inválido' });
+    instructorId = employee.id;
+  }
+
+  const info = await db.prepare(`
+    INSERT INTO academy_classes (course_id, title, scheduled_at, instructor_employee_id, notes)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(row.id, title.trim(), scheduledAt || null, instructorId, (notes || '').trim() || null);
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+app.delete('/api/academy-classes/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  const cls = await db.prepare('SELECT * FROM academy_classes WHERE id = ?').get(req.params.id);
+  if (!cls) return res.status(404).json({ error: 'No encontrada' });
+  const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(cls.course_id);
+  if (course && !courseDepartmentAllowed(req, res, course.department)) return;
+
+  await db.prepare('DELETE FROM academy_classes WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/cadets/:id/evaluations', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCadetWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  const rows = await db.prepare(`
+    SELECT ev.*, co.name AS course_name
+    FROM academy_evaluations ev
+    LEFT JOIN academy_courses co ON co.id = ev.course_id
+    WHERE ev.cadet_id = ?
+    ORDER BY ev.created_at DESC
+  `).all(req.params.id);
+  res.json(rows);
+});
+
+app.post('/api/cadets/:id/evaluations', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCadetWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  const { title, courseId, score, maxScore, passed, notes } = req.body || {};
+  if (!title || !title.trim()) return res.status(400).json({ error: 'El título es requerido' });
+
+  let course = null;
+  if (courseId) {
+    course = await db.prepare('SELECT id FROM academy_courses WHERE id = ?').get(courseId);
+    if (!course) return res.status(400).json({ error: 'Curso inválido' });
+  }
+
+  const info = await db.prepare(`
+    INSERT INTO academy_evaluations (cadet_id, course_id, title, score, max_score, passed, notes, evaluator_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    row.id,
+    course ? course.id : null,
+    title.trim(),
+    score !== undefined && score !== null && score !== '' ? Number(score) : null,
+    maxScore !== undefined && maxScore !== null && maxScore !== '' ? Number(maxScore) : 100,
+    passed === undefined || passed === null || passed === '' ? null : (passed ? 1 : 0),
+    (notes || '').trim() || null,
+    req.session.username,
+  );
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+app.delete('/api/academy-evaluations/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  const ev = await db.prepare('SELECT * FROM academy_evaluations WHERE id = ?').get(req.params.id);
+  if (!ev) return res.status(404).json({ error: 'No encontrada' });
+  const cadet = await db.prepare('SELECT * FROM cadets WHERE id = ?').get(ev.cadet_id);
+  if (cadet && !requireDepartmentAccess(req, res, cadet)) return;
+
+  await db.prepare('DELETE FROM academy_evaluations WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/cadets/:id/notes', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCadetWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  const rows = await db.prepare('SELECT * FROM cadet_notes WHERE cadet_id = ? ORDER BY created_at DESC').all(req.params.id);
+  res.json(rows);
+});
+
+app.post('/api/cadets/:id/notes', requireAuth, requireAcademyAccess, async (req, res) => {
+  const row = await getCadetWithAccess(req, res, req.params.id);
+  if (!row) return;
+
+  const { body } = req.body || {};
+  if (!body || !body.trim()) return res.status(400).json({ error: 'El informe no puede estar vacío' });
+
+  const info = await db.prepare(`
+    INSERT INTO cadet_notes (cadet_id, author_name, body)
+    VALUES (?, ?, ?)
+  `).run(row.id, req.session.fullName || req.session.username, body.trim());
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+app.delete('/api/cadet-notes/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  const note = await db.prepare('SELECT * FROM cadet_notes WHERE id = ?').get(req.params.id);
+  if (!note) return res.status(404).json({ error: 'No encontrada' });
+  const cadet = await db.prepare('SELECT * FROM cadets WHERE id = ?').get(note.cadet_id);
+  if (cadet && !requireDepartmentAccess(req, res, cadet)) return;
+
+  await db.prepare('DELETE FROM cadet_notes WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ---------- Informes (plantillas por departamento) ----------
 
-const VALID_FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'select'];
+// "heading" no es un campo de respuesta: es un título visual para separar
+// en secciones un formulario largo (ej: "Datos del paciente", "Diagnóstico").
+// No pide dato al agente ni se guarda en data_json.
+const VALID_FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'select', 'heading'];
 
 function validateReportFields(fields) {
   if (!Array.isArray(fields) || fields.length === 0) return 'La plantilla necesita al menos un campo';
@@ -1205,7 +1560,7 @@ function normalizeReportFields(fields) {
     key: String(f.key).trim(),
     label: String(f.label).trim(),
     type: f.type,
-    required: !!f.required,
+    required: f.type === 'heading' ? false : !!f.required,
     ...(f.type === 'select' ? { options: f.options.map((o) => String(o).trim()).filter(Boolean) } : {}),
   }));
 }
@@ -1288,7 +1643,10 @@ app.post('/api/report-templates/:id/submissions', requireLoggedIn, async (req, r
   const canAccess = req.session.isSuperadmin || req.session.department === template.department;
   if (!canAccess) return res.status(403).json({ error: 'Esa plantilla no es de tu departamento' });
 
-  const { data } = req.body || {};
+  const { title, data } = req.body || {};
+  if (!title || !title.trim()) {
+    return res.status(400).json({ error: 'Ponele un título al informe' });
+  }
   const fields = JSON.parse(template.fields_json);
   for (const f of fields) {
     const value = data?.[f.key];
@@ -1298,9 +1656,9 @@ app.post('/api/report-templates/:id/submissions', requireLoggedIn, async (req, r
   }
 
   const info = await db.prepare(`
-    INSERT INTO report_submissions (template_id, department, employee_id, data_json)
-    VALUES (?, ?, ?, ?)
-  `).run(template.id, template.department, req.session.employeeId, JSON.stringify(data || {}));
+    INSERT INTO report_submissions (template_id, department, employee_id, title, data_json)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(template.id, template.department, req.session.employeeId, title.trim(), JSON.stringify(data || {}));
 
   res.status(201).json({ id: info.lastInsertRowid });
 });
@@ -1308,6 +1666,29 @@ app.post('/api/report-templates/:id/submissions', requireLoggedIn, async (req, r
 // Todo informe entra "pendiente" y queda así hasta que el staff de ese
 // departamento (quien gestiona las plantillas) lo aprueba o lo rechaza.
 const VALID_REPORT_STATUSES = ['pendiente', 'aprobado', 'rechazado'];
+
+// Bandeja de revisión: todos los informes pendientes de todas las
+// plantillas del departamento del staff, en un solo lugar (antes solo se
+// veían entrando plantilla por plantilla a "Gestionar plantillas → Ver
+// respuestas", lo que los dejaba escondidos).
+app.get('/api/report-submissions/pending', requireAuth, async (req, res) => {
+  const scopedDept = scopedDepartment(req);
+  const conditions = ["s.status = 'pendiente'"];
+  const params = [];
+  if (scopedDept) {
+    conditions.push('s.department = ?');
+    params.push(scopedDept);
+  }
+  const rows = await db.prepare(`
+    SELECT s.*, e.full_name AS employee_name, t.name AS template_name
+    FROM report_submissions s
+    JOIN employees e ON e.id = s.employee_id
+    JOIN report_templates t ON t.id = s.template_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY s.created_at ASC
+  `).all(...params);
+  res.json(rows.map((r) => ({ ...r, data: JSON.parse(r.data_json) })));
+});
 
 app.patch('/api/report-submissions/:id', requireAuth, async (req, res) => {
   const row = await db.prepare('SELECT * FROM report_submissions WHERE id = ?').get(req.params.id);
@@ -1382,7 +1763,10 @@ function writeSubmissionPdf(res, { template, submission, employeeName }) {
   const muted = '#5b7387';
   const text = '#101c29';
 
-  doc.fillColor(accent).fontSize(20).text(template.name, { align: 'left' });
+  doc.fillColor(accent).fontSize(20).text(submission.title || template.name, { align: 'left' });
+  if (submission.title) {
+    doc.fillColor(muted).fontSize(10).text(template.name);
+  }
   if (template.description) {
     doc.moveDown(0.2);
     doc.fillColor(muted).fontSize(10).text(template.description);
@@ -1416,6 +1800,17 @@ function writeSubmissionPdf(res, { template, submission, employeeName }) {
     // mínimo razonable, para no cortar una etiqueta sola al final de la hoja.
     if (doc.y > bottomLimit - 60) doc.addPage();
 
+    if (f.type === 'heading') {
+      if (doc.y > doc.page.margins.top) doc.moveDown(0.3);
+      doc.fillColor(accent).fontSize(13).font('Helvetica-Bold').text(f.label);
+      doc.moveTo(doc.page.margins.left, doc.y + 2)
+        .lineTo(doc.page.width - doc.page.margins.right, doc.y + 2)
+        .strokeColor('#d8e0e6')
+        .stroke();
+      doc.moveDown(0.5);
+      continue;
+    }
+
     doc.fillColor(accent).fontSize(9).font('Helvetica-Bold').text(f.label.toUpperCase());
     doc.moveDown(0.15);
     const value = data[f.key];
@@ -1442,14 +1837,27 @@ app.get('/api/report-submissions/:id/pdf', requireLoggedIn, async (req, res) => 
   const employee = await db.prepare('SELECT full_name FROM employees WHERE id = ?').get(row.employee_id);
 
   const download = req.query.download === '1';
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename="informe-${row.id}.pdf"`);
 
-  writeSubmissionPdf(res, {
-    template: { ...template, fields: JSON.parse(template.fields_json) },
-    submission: row,
-    employeeName: employee ? employee.full_name : 'Empleado',
-  });
+  // writeSubmissionPdf escribe de forma síncrona (pdfkit tira si le falta
+  // algún recurso de fuente estándar): si algo falla ahí adentro, sin este
+  // try/catch la respuesta queda colgada para siempre (headers puestos,
+  // cuerpo nunca escrito) en vez de devolver un error legible.
+  try {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename="informe-${row.id}.pdf"`);
+    writeSubmissionPdf(res, {
+      template: { ...template, fields: JSON.parse(template.fields_json) },
+      submission: row,
+      employeeName: employee ? employee.full_name : 'Empleado',
+    });
+  } catch (err) {
+    console.error('Error generando el PDF del informe', req.params.id, err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'No se pudo generar el PDF' });
+    } else {
+      res.end();
+    }
+  }
 });
 
 if (require.main === module) {

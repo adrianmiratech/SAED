@@ -400,6 +400,7 @@ async function switchTab(tab) {
   } else if (tab === 'informes') {
     await loadTemplates();
     loadMyReports();
+    loadPendingReports();
   } else if (tab === 'postulaciones') {
     loadApplications();
   } else if (tab === 'personal') {
@@ -522,6 +523,11 @@ const fillReportMessage = document.getElementById('fill-report-message');
 const submissionsModalBackdrop = document.getElementById('submissions-modal-backdrop');
 const submissionsListEl = document.getElementById('submissions-list');
 const submissionsEmptyEl = document.getElementById('submissions-empty');
+const fillReportTitleInput = document.getElementById('fill-report-title-input');
+const pendingReportsCard = document.getElementById('pending-reports-card');
+const pendingReportsList = document.getElementById('pending-reports-list');
+const pendingReportsEmpty = document.getElementById('pending-reports-empty');
+const pendingReportsCount = document.getElementById('pending-reports-count');
 
 async function loadTemplates() {
   const res = await fetch('/api/report-templates');
@@ -586,16 +592,78 @@ function renderMyReports() {
   myReportsListEl.innerHTML = myReports.map((r) => `
     <div class="staff-row">
       <div class="staff-meta">
-        <span class="staff-username">${escapeHtml(r.template_name)}</span>
+        <span class="staff-username">${escapeHtml(r.title || r.template_name)}</span>
         ${reportStatusPill(r.status)}
-        <span class="muted-link">${formatDate(r.created_at)}</span>
+        <span class="muted-link">${escapeHtml(r.template_name)} · ${formatDate(r.created_at)}</span>
       </div>
       ${reportPdfLinks(r.id)}
     </div>
   `).join('');
 }
 
+// Bandeja de revisión: todos los informes pendientes del departamento en
+// un solo lugar, visible apenas se entra a Informes (antes había que
+// entrar a "Gestionar plantillas" y abrir cada una para encontrarlos).
+let pendingReports = [];
+
+async function loadPendingReports() {
+  if (!canManage()) {
+    pendingReportsCard.style.display = 'none';
+    return;
+  }
+  pendingReportsCard.style.display = 'block';
+  const res = await fetch('/api/report-submissions/pending');
+  if (!res.ok) return;
+  pendingReports = await res.json();
+  renderPendingReports();
+}
+
+function renderPendingReports() {
+  pendingReportsCount.textContent = pendingReports.length;
+  if (pendingReports.length === 0) {
+    pendingReportsList.innerHTML = '';
+    pendingReportsEmpty.style.display = 'block';
+    return;
+  }
+  pendingReportsEmpty.style.display = 'none';
+  pendingReportsList.innerHTML = pendingReports.map((s) => `
+    <div class="field-row">
+      <div class="field-row-footer" style="margin-top:0;">
+        <span class="staff-username">${escapeHtml(s.title || s.template_name)}</span>
+        <span class="muted-link">${escapeHtml(s.template_name)} · ${escapeHtml(s.employee_name)} · ${formatDate(s.created_at)}</span>
+      </div>
+      <div class="review-decision" style="margin-top:10px;">
+        <button class="btn btn-ok review-btn" data-pending-review="${s.id}" data-status="aprobado"><span class="review-btn-icon">✓</span> Aprobar</button>
+        <button class="btn btn-danger review-btn" data-pending-review="${s.id}" data-status="rechazado"><span class="review-btn-icon">✕</span> Rechazar</button>
+      </div>
+      <div class="submit-row" style="margin-top:10px;">
+        ${reportPdfLinks(s.id)}
+      </div>
+    </div>
+  `).join('');
+
+  pendingReportsList.querySelectorAll('[data-pending-review]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const res = await fetch(`/api/report-submissions/${btn.dataset.pendingReview}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: btn.dataset.status }),
+      });
+      if (res.ok) {
+        showToast(btn.dataset.status === 'aprobado' ? 'Informe aprobado.' : 'Informe rechazado.', btn.dataset.status === 'aprobado' ? undefined : 'danger');
+        await loadPendingReports();
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'No se pudo actualizar el informe.', 'danger');
+      }
+    });
+  });
+}
+
 function renderFillField(f) {
+  if (f.type === 'heading') {
+    return `<h3 class="modal-section-title">${escapeHtml(f.label)}</h3>`;
+  }
   const req = f.required ? 'required' : '';
   const labelHtml = `<label for="fill-field-${escapeHtml(f.key)}">${escapeHtml(f.label)}${f.required ? '' : ' <span class="hint">(opcional)</span>'}</label>`;
   if (f.type === 'textarea') {
@@ -621,6 +689,7 @@ function openFillReportModal(templateId) {
 
   fillReportFields.innerHTML = t.fields.map((f) => renderFillField(f)).join('');
   fillReportModalBackdrop.classList.add('open');
+  fillReportTitleInput.focus();
 }
 
 function closeFillReportModal() {
@@ -634,6 +703,7 @@ fillReportForm.addEventListener('submit', async (e) => {
   fillReportMessage.className = 'message';
   fillReportMessage.textContent = '';
 
+  const title = fillReportTitleInput.value.trim();
   const data = {};
   fillReportFields.querySelectorAll('[data-field-key]').forEach((el) => {
     data[el.dataset.fieldKey] = el.value;
@@ -645,7 +715,7 @@ fillReportForm.addEventListener('submit', async (e) => {
     const res = await fetch(`/api/report-templates/${currentFillTemplate.id}/submissions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data }),
+      body: JSON.stringify({ title, data }),
     });
     const resData = await res.json();
     if (!res.ok) throw new Error(resData.error || 'No se pudo enviar el informe');
@@ -728,6 +798,7 @@ function renderFieldEditorRows() {
         <div>
           <label>Tipo</label>
           <select class="field-type-input">
+            <option value="heading" ${f.type === 'heading' ? 'selected' : ''}>Título de sección (sin respuesta)</option>
             <option value="text" ${f.type === 'text' ? 'selected' : ''}>Texto corto</option>
             <option value="textarea" ${f.type === 'textarea' ? 'selected' : ''}>Texto largo</option>
             <option value="number" ${f.type === 'number' ? 'selected' : ''}>Número</option>
@@ -741,7 +812,7 @@ function renderFieldEditorRows() {
         <input type="text" class="field-options-input" value="${escapeHtml((f.options || []).join(', '))}" placeholder="Ej: Bueno, Regular, Dañado" />
       </div>
       <div class="field-row-footer">
-        <label class="active-check-label"><input type="checkbox" class="field-required-input" ${f.required ? 'checked' : ''} style="width:auto" /> Obligatorio</label>
+        <label class="active-check-label" style="display:${f.type === 'heading' ? 'none' : 'flex'}"><input type="checkbox" class="field-required-input" ${f.required ? 'checked' : ''} style="width:auto" /> Obligatorio</label>
         <button type="button" class="btn btn-danger btn-sm remove-field-btn">Eliminar campo</button>
       </div>
     </div>
@@ -753,6 +824,7 @@ function renderFieldEditorRows() {
     rowEl.querySelector('.field-type-input').addEventListener('change', (e) => {
       currentTemplateFields[idx].type = e.target.value;
       rowEl.querySelector('.field-options-wrap').style.display = e.target.value === 'select' ? 'block' : 'none';
+      rowEl.querySelector('.active-check-label').style.display = e.target.value === 'heading' ? 'none' : 'flex';
     });
     const optionsInput = rowEl.querySelector('.field-options-input');
     if (optionsInput) {
@@ -893,16 +965,18 @@ function renderSubmissionsList(rows, template) {
   submissionsListEl.innerHTML = rows.map((s) => `
     <div class="field-row">
       <div class="field-row-footer" style="margin-top:0;">
-        <span class="staff-username">${escapeHtml(s.employee_name)}</span>
+        <span class="staff-username">${escapeHtml(s.title || s.employee_name)}</span>
         ${reportStatusPill(s.status)}
-        <span class="muted-link">${formatDate(s.created_at)}</span>
+        <span class="muted-link">${escapeHtml(s.employee_name)} · ${formatDate(s.created_at)}</span>
       </div>
-      ${(template ? template.fields : []).map((f) => `
+      ${(template ? template.fields : []).map((f) => (f.type === 'heading'
+        ? `<h3 class="modal-section-title" style="margin-top:12px;">${escapeHtml(f.label)}</h3>`
+        : `
         <div class="report-field-value">
           <div class="k">${escapeHtml(f.label)}</div>
           <div class="v">${escapeHtml(String(s.data[f.key] ?? '') || '—')}</div>
         </div>
-      `).join('')}
+      `)).join('')}
       ${s.review_notes ? `
         <div class="report-field-value">
           <div class="k">Notas de revisión</div>
@@ -929,6 +1003,7 @@ function renderSubmissionsList(rows, template) {
       });
       if (res.ok) {
         await openSubmissionsModal(currentSubmissionsTemplateId);
+        loadPendingReports();
         showToast(btn.dataset.status === 'aprobado' ? 'Informe aprobado.' : 'Informe rechazado.', btn.dataset.status === 'aprobado' ? undefined : 'danger');
       } else {
         const data = await res.json();

@@ -204,6 +204,61 @@ async function setup() {
       data_json TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS cadets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      full_name TEXT NOT NULL,
+      phone TEXT,
+      discord_info TEXT,
+      department TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'activo',
+      notes TEXT,
+      employee_id INTEGER REFERENCES employees(id),
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      graduated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS academy_courses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      department TEXT,
+      description TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS academy_classes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      course_id INTEGER NOT NULL REFERENCES academy_courses(id),
+      title TEXT NOT NULL,
+      scheduled_at TEXT,
+      instructor_employee_id INTEGER REFERENCES employees(id),
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS academy_evaluations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cadet_id INTEGER NOT NULL REFERENCES cadets(id),
+      course_id INTEGER REFERENCES academy_courses(id),
+      title TEXT NOT NULL,
+      score REAL,
+      max_score REAL NOT NULL DEFAULT 100,
+      passed INTEGER,
+      notes TEXT,
+      evaluator_name TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS cadet_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cadet_id INTEGER NOT NULL REFERENCES cadets(id),
+      author_name TEXT,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // employees y admins ya existían con datos reales antes de sumar estas
@@ -217,6 +272,7 @@ async function setup() {
   await ensureColumn('report_submissions', 'review_notes TEXT');
   await ensureColumn('report_submissions', 'reviewed_by TEXT');
   await ensureColumn('report_submissions', 'reviewed_at TEXT');
+  await ensureColumn('report_submissions', 'title TEXT');
   // Índice único parcial-friendly: SQLite trata cada NULL como distinto en
   // un UNIQUE INDEX, así que varios empleados sin usuario de fichaje conviven bien.
   await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_username ON employees(username)');
@@ -228,6 +284,19 @@ async function setup() {
   const addedGrantsColumns = await ensureColumn('employee_roles', 'grants_staff INTEGER NOT NULL DEFAULT 0');
   await ensureColumn('employee_roles', 'grants_superadmin INTEGER NOT NULL DEFAULT 0');
   await ensureColumn('employee_roles', 'grants_hr_access INTEGER NOT NULL DEFAULT 0');
+
+  // El acceso a la Academia (cadetes, cursos, evaluaciones) sigue el mismo
+  // patrón: lo otorga la división, no un casillero suelto. La primera vez
+  // que esta columna aparece, se la activa (junto con "staff", para que
+  // puedan entrar al panel) en la división "RTD" ya existente, sin esperar
+  // a que alguien la reasigne a mano.
+  const addedAcademyColumn = await ensureColumn('employee_roles', 'grants_academy_access INTEGER NOT NULL DEFAULT 0');
+  if (addedAcademyColumn) {
+    await client.execute(`
+      UPDATE employee_roles SET grants_staff = 1, grants_academy_access = 1
+      WHERE name = 'RTD (Recruitment and Training Division)' AND department IS NULL
+    `);
+  }
 
   // employees.role_id (una sola división) quedó reemplazado por la tabla
   // employee_role_links (varias). Si la columna vieja todavía existe en
@@ -269,18 +338,18 @@ async function setup() {
   // repetir sin volver a duplicar nada. "Dirección" y "Recursos Humanos"
   // ya vienen con el acceso correspondiente otorgado.
   const seedRoles = [
-    ['RTD (Recruitment and Training Division)', 0, 0, 0],
-    ['Recursos Humanos', 1, 0, 1],
-    ['Dirección', 1, 1, 0],
-    ['Estudiantes', 0, 0, 0],
+    ['RTD (Recruitment and Training Division)', 1, 0, 0, 1],
+    ['Recursos Humanos', 1, 0, 1, 0],
+    ['Dirección', 1, 1, 0, 0],
+    ['Estudiantes', 0, 0, 0, 0],
   ];
-  for (const [name, grantsStaff, grantsSuperadmin, grantsHrAccess] of seedRoles) {
+  for (const [name, grantsStaff, grantsSuperadmin, grantsHrAccess, grantsAcademyAccess] of seedRoles) {
     const existingRole = await prepare('SELECT id FROM employee_roles WHERE name = ? AND department IS NULL').get(name);
     if (!existingRole) {
       await prepare(`
-        INSERT INTO employee_roles (name, department, grants_staff, grants_superadmin, grants_hr_access)
-        VALUES (?, NULL, ?, ?, ?)
-      `).run(name, grantsStaff, grantsSuperadmin, grantsHrAccess);
+        INSERT INTO employee_roles (name, department, grants_staff, grants_superadmin, grants_hr_access, grants_academy_access)
+        VALUES (?, NULL, ?, ?, ?, ?)
+      `).run(name, grantsStaff, grantsSuperadmin, grantsHrAccess, grantsAcademyAccess);
     } else if (addedGrantsColumns) {
       // Backfill único: estos roles ya existían de antes de que existiera
       // el concepto de "otorgar acceso", así que la primera vez que la

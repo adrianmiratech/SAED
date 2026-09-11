@@ -91,6 +91,19 @@
         </div>
 
         <div id="tab-informes" style="display:none">
+          <div class="card" id="pending-reports-card" style="display:none">
+            <div class="toolbar">
+              <h1 style="font-size:15px; margin:0;">Informes pendientes de revisión</h1>
+              <span style="flex:1"></span>
+              <span class="status-pill status-pendiente" id="pending-reports-count">0</span>
+            </div>
+            <div id="pending-reports-list" class="staff-list"></div>
+            <div id="pending-reports-empty" class="empty-state">
+              <div class="empty-icon">✅</div>
+              <p>No hay informes esperando revisión.</p>
+            </div>
+          </div>
+
           <div class="card">
             <div class="toolbar">
               <h1 style="font-size:15px; margin:0;">Plantillas disponibles</h1>
@@ -846,6 +859,10 @@
         </div>
       </div>
       <form id="fill-report-form">
+        <label for="fill-report-title-input">Título del informe</label>
+        <input type="text" id="fill-report-title-input" required placeholder="Ej: Patrullaje turno tarde - 5 de septiembre" />
+
+        <h3 class="modal-section-title">Datos del informe</h3>
         <div id="fill-report-fields"></div>
         <div class="submit-row">
           <button type="submit" class="btn-primary" id="fill-report-submit">Enviar informe</button>
