@@ -62,7 +62,8 @@ app.post('/api/login', async (req, res) => {
 
   req.session.adminUser = admin.username;
   req.session.adminDepartment = admin.department || null;
-  res.json({ ok: true, username: admin.username, department: admin.department || null });
+  req.session.hrAccess = !!admin.hr_access;
+  res.json({ ok: true, username: admin.username, department: admin.department || null, hrAccess: !!admin.hr_access });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -75,18 +76,19 @@ app.get('/api/session', (req, res) => {
     authenticated: !!(req.session && req.session.adminUser),
     username: req.session?.adminUser || null,
     department: req.session?.adminDepartment || null,
+    hrAccess: !!(req.session?.hrAccess),
   });
 });
 
 // ---------- Staff ----------
 
 app.get('/api/admins', requireAuth, requireSuperAdmin, async (req, res) => {
-  const rows = await db.prepare('SELECT id, username, department, created_at FROM admins ORDER BY created_at ASC').all();
+  const rows = await db.prepare('SELECT id, username, department, hr_access, created_at FROM admins ORDER BY created_at ASC').all();
   res.json(rows);
 });
 
 app.post('/api/admins', requireAuth, requireSuperAdmin, async (req, res) => {
-  const { username, password, department } = req.body || {};
+  const { username, password, department, hrAccess } = req.body || {};
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
@@ -104,10 +106,22 @@ app.post('/api/admins', requireAuth, requireSuperAdmin, async (req, res) => {
   }
 
   const hash = bcrypt.hashSync(password, 10);
-  const info = await db.prepare('INSERT INTO admins (username, password_hash, department) VALUES (?, ?, ?)')
-    .run(username.trim(), hash, department || null);
+  const info = await db.prepare('INSERT INTO admins (username, password_hash, department, hr_access) VALUES (?, ?, ?, ?)')
+    .run(username.trim(), hash, department || null, hrAccess ? 1 : 0);
 
-  res.status(201).json({ id: info.lastInsertRowid, username: username.trim(), department: department || null });
+  res.status(201).json({ id: info.lastInsertRowid, username: username.trim(), department: department || null, hrAccess: !!hrAccess });
+});
+
+app.patch('/api/admins/:id', requireAuth, requireSuperAdmin, async (req, res) => {
+  const target = await db.prepare('SELECT * FROM admins WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ error: 'No encontrado' });
+
+  const { hrAccess } = req.body || {};
+  await db.prepare('UPDATE admins SET hr_access = ? WHERE id = ?').run(
+    hrAccess !== undefined ? (hrAccess ? 1 : 0) : target.hr_access,
+    req.params.id,
+  );
+  res.json({ ok: true });
 });
 
 app.delete('/api/admins/:id', requireAuth, requireSuperAdmin, async (req, res) => {
@@ -404,7 +418,72 @@ app.patch('/api/ranks/:id', requireAuth, requireSuperAdmin, async (req, res) => 
   res.json({ ok: true });
 });
 
+// ---------- Roles / divisiones ----------
+
+// A diferencia de los rangos (que definen jerarquía y tarifa por hora),
+// los roles son una etiqueta organizativa aparte: un mismo empleado puede
+// tener rango "Médico General" y rol "RTD" al mismo tiempo.
+app.get('/api/employee-roles', requireAuth, async (req, res) => {
+  const scopedDept = req.session.adminDepartment;
+  const rows = scopedDept
+    ? await db.prepare('SELECT * FROM employee_roles WHERE department IS NULL OR department = ? ORDER BY name ASC').all(scopedDept)
+    : await db.prepare('SELECT * FROM employee_roles ORDER BY name ASC').all();
+  res.json(rows);
+});
+
+app.post('/api/employee-roles', requireAuth, requireSuperAdmin, async (req, res) => {
+  const { name, department } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'El nombre del rol es requerido' });
+  if (department && !VALID_DEPARTMENTS.includes(department)) {
+    return res.status(400).json({ error: 'Departamento inválido' });
+  }
+
+  const info = await db.prepare('INSERT INTO employee_roles (name, department) VALUES (?, ?)').run(name.trim(), department || null);
+  res.status(201).json({ id: info.lastInsertRowid, name: name.trim(), department: department || null });
+});
+
+app.patch('/api/employee-roles/:id', requireAuth, requireSuperAdmin, async (req, res) => {
+  const role = await db.prepare('SELECT * FROM employee_roles WHERE id = ?').get(req.params.id);
+  if (!role) return res.status(404).json({ error: 'Rol no encontrado' });
+
+  const { name, department } = req.body || {};
+  if (department !== undefined && department && !VALID_DEPARTMENTS.includes(department)) {
+    return res.status(400).json({ error: 'Departamento inválido' });
+  }
+
+  await db.prepare('UPDATE employee_roles SET name = ?, department = ? WHERE id = ?').run(
+    name !== undefined ? name.trim() : role.name,
+    department !== undefined ? (department || null) : role.department,
+    req.params.id,
+  );
+  res.json({ ok: true });
+});
+
+app.delete('/api/employee-roles/:id', requireAuth, requireSuperAdmin, async (req, res) => {
+  const role = await db.prepare('SELECT * FROM employee_roles WHERE id = ?').get(req.params.id);
+  if (!role) return res.status(404).json({ error: 'Rol no encontrado' });
+
+  await db.prepare('UPDATE employees SET role_id = NULL WHERE role_id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM employee_roles WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+async function validateRoleForDepartment(roleId, department) {
+  const role = await db.prepare('SELECT * FROM employee_roles WHERE id = ?').get(roleId);
+  if (!role) return null;
+  if (role.department && role.department !== department) return null;
+  return role;
+}
+
 // ---------- Empleados ----------
+
+// Columnas explícitas (nunca "e.*") para no exponer password_hash del
+// login de fichaje en las respuestas de la API.
+const EMPLOYEE_COLUMNS = `
+  e.id, e.full_name, e.phone, e.discord_info, e.department, e.rank_id, e.active,
+  e.created_by, e.created_at, e.role_id, e.username,
+  (e.username IS NOT NULL) AS has_login
+`;
 
 app.get('/api/employees', requireAuth, async (req, res) => {
   const { department } = req.query;
@@ -422,9 +501,12 @@ app.get('/api/employees', requireAuth, async (req, res) => {
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = await db.prepare(`
-    SELECT e.*, r.level AS rank_level, r.name AS rank_name, r.hourly_rate AS rank_hourly_rate
+    SELECT ${EMPLOYEE_COLUMNS},
+      r.level AS rank_level, r.name AS rank_name, r.hourly_rate AS rank_hourly_rate,
+      er.name AS role_name
     FROM employees e
     JOIN ranks r ON r.id = e.rank_id
+    LEFT JOIN employee_roles er ON er.id = e.role_id
     ${where}
     ORDER BY e.active DESC, r.level DESC, e.full_name ASC
   `).all(...params);
@@ -439,7 +521,7 @@ async function validateRankForDepartment(rankId, department) {
 }
 
 app.post('/api/employees', requireAuth, async (req, res) => {
-  const { fullName, phone, discordInfo, rankId } = req.body || {};
+  const { fullName, phone, discordInfo, rankId, roleId } = req.body || {};
   const scopedDept = req.session.adminDepartment;
   const department = scopedDept || req.body?.department;
 
@@ -454,10 +536,17 @@ app.post('/api/employees', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Rango inválido para ese departamento' });
   }
 
+  let role_id = null;
+  if (roleId) {
+    const role = await validateRoleForDepartment(roleId, department);
+    if (!role) return res.status(400).json({ error: 'Rol inválido para ese departamento' });
+    role_id = role.id;
+  }
+
   const info = await db.prepare(`
-    INSERT INTO employees (full_name, phone, discord_info, department, rank_id, created_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(fullName.trim(), phone.trim(), (discordInfo || '').trim() || null, department, rank.id, req.session.adminUser);
+    INSERT INTO employees (full_name, phone, discord_info, department, rank_id, role_id, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(fullName.trim(), phone.trim(), (discordInfo || '').trim() || null, department, rank.id, role_id, req.session.adminUser);
 
   res.status(201).json({ id: info.lastInsertRowid });
 });
@@ -467,7 +556,10 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
   if (!row) return res.status(404).json({ error: 'No encontrado' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
-  const { fullName, phone, discordInfo, rankId, active } = req.body || {};
+  const {
+    fullName, phone, discordInfo, rankId, active, roleId, fichajeUsername, fichajePassword,
+  } = req.body || {};
+
   let rank_id = row.rank_id;
   if (rankId !== undefined) {
     const rank = await validateRankForDepartment(rankId, row.department);
@@ -475,8 +567,45 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
     rank_id = rank.id;
   }
 
+  let role_id = row.role_id;
+  if (roleId !== undefined) {
+    if (roleId) {
+      const role = await validateRoleForDepartment(roleId, row.department);
+      if (!role) return res.status(400).json({ error: 'Rol inválido para ese departamento' });
+      role_id = role.id;
+    } else {
+      role_id = null;
+    }
+  }
+
+  // El acceso de fichaje es opcional: se define/cambia desde acá mismo.
+  // Vaciar el usuario borra también la contraseña (deshabilita el acceso).
+  let username = row.username;
+  let password_hash = row.password_hash;
+  if (fichajeUsername !== undefined) {
+    const trimmed = (fichajeUsername || '').trim();
+    if (trimmed) {
+      const existingUsername = await db.prepare('SELECT id FROM employees WHERE username = ? AND id != ?').get(trimmed, req.params.id);
+      if (existingUsername) return res.status(409).json({ error: 'Ya hay un empleado con ese usuario de fichaje' });
+      username = trimmed;
+    } else {
+      username = null;
+      password_hash = null;
+    }
+  }
+  if (fichajePassword) {
+    if (fichajePassword.length < 6) {
+      return res.status(400).json({ error: 'La contraseña de fichaje debe tener al menos 6 caracteres' });
+    }
+    if (!username) {
+      return res.status(400).json({ error: 'Definí primero un usuario de fichaje' });
+    }
+    password_hash = bcrypt.hashSync(fichajePassword, 10);
+  }
+
   await db.prepare(`
-    UPDATE employees SET full_name = ?, phone = ?, discord_info = ?, rank_id = ?, active = ?
+    UPDATE employees
+    SET full_name = ?, phone = ?, discord_info = ?, rank_id = ?, active = ?, role_id = ?, username = ?, password_hash = ?
     WHERE id = ?
   `).run(
     fullName !== undefined ? fullName.trim() : row.full_name,
@@ -484,6 +613,9 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
     discordInfo !== undefined ? ((discordInfo || '').trim() || null) : row.discord_info,
     rank_id,
     active !== undefined ? (active ? 1 : 0) : row.active,
+    role_id,
+    username,
+    password_hash,
     req.params.id,
   );
 
@@ -615,113 +747,146 @@ app.delete('/api/payroll/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Turnos ----------
+// ---------- Fichaje (acceso propio del empleado) ----------
 
-app.get('/api/shifts', requireAuth, async (req, res) => {
+// Namespace de sesión totalmente aparte del de staff admin (adminUser):
+// un empleado ficha con su propia cuenta, no con la del panel de gestión.
+function requireEmployeeAuth(req, res, next) {
+  if (req.session && req.session.employeeId) return next();
+  return res.status(401).json({ error: 'No autenticado' });
+}
+
+app.post('/api/employee/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
+  }
+
+  const employee = await db.prepare('SELECT * FROM employees WHERE username = ?').get(username.trim());
+  if (!employee || !employee.password_hash || !bcrypt.compareSync(password, employee.password_hash)) {
+    return res.status(401).json({ error: 'Credenciales inválidas' });
+  }
+  if (!employee.active) {
+    return res.status(403).json({ error: 'Tu cuenta está inactiva. Consultá con tu departamento.' });
+  }
+
+  req.session.employeeId = employee.id;
+  req.session.employeeName = employee.full_name;
+  req.session.employeeDepartment = employee.department;
+  res.json({ ok: true, fullName: employee.full_name, department: employee.department });
+});
+
+app.post('/api/employee/logout', (req, res) => {
+  req.session.employeeId = null;
+  req.session.employeeName = null;
+  req.session.employeeDepartment = null;
+  res.json({ ok: true });
+});
+
+app.get('/api/employee/session', (req, res) => {
+  res.json({
+    authenticated: !!(req.session && req.session.employeeId),
+    fullName: req.session?.employeeName || null,
+    department: req.session?.employeeDepartment || null,
+  });
+});
+
+app.get('/api/employee/attendance/status', requireEmployeeAuth, async (req, res) => {
+  const open = await db.prepare(
+    'SELECT * FROM attendance WHERE employee_id = ? AND clock_out IS NULL ORDER BY clock_in DESC LIMIT 1',
+  ).get(req.session.employeeId);
+  res.json({ clockedIn: !!open, since: open ? open.clock_in : null });
+});
+
+app.post('/api/employee/attendance/clock', requireEmployeeAuth, async (req, res) => {
+  const open = await db.prepare(
+    'SELECT * FROM attendance WHERE employee_id = ? AND clock_out IS NULL ORDER BY clock_in DESC LIMIT 1',
+  ).get(req.session.employeeId);
+
+  if (open) {
+    await db.prepare(`UPDATE attendance SET clock_out = datetime('now') WHERE id = ?`).run(open.id);
+    return res.json({ ok: true, clockedIn: false });
+  }
+
+  await db.prepare('INSERT INTO attendance (employee_id, department) VALUES (?, ?)')
+    .run(req.session.employeeId, req.session.employeeDepartment);
+  res.json({ ok: true, clockedIn: true });
+});
+
+app.get('/api/employee/attendance/history', requireEmployeeAuth, async (req, res) => {
+  const rows = await db.prepare(
+    'SELECT * FROM attendance WHERE employee_id = ? ORDER BY clock_in DESC LIMIT 60',
+  ).all(req.session.employeeId);
+  res.json(rows);
+});
+
+// ---------- Fichajes (vista de RRHH / Dirección sobre el personal) ----------
+
+// Solo lo ve el staff sin departamento asignado (nivel SAED) o el staff
+// al que un superadmin le haya marcado el acceso de RRHH/Dirección.
+function requireAttendanceAccess(req, res, next) {
+  if (req.session && req.session.adminUser && (!req.session.adminDepartment || req.session.hrAccess)) return next();
+  return res.status(403).json({ error: 'No autorizado' });
+}
+
+app.get('/api/attendance', requireAuth, requireAttendanceAccess, async (req, res) => {
   const { department, employeeId, from, to } = req.query;
   const scopedDept = req.session.adminDepartment;
   const conditions = [];
   const params = [];
 
   if (scopedDept) {
-    conditions.push('s.department = ?');
+    conditions.push('a.department = ?');
     params.push(scopedDept);
   } else if (department && VALID_DEPARTMENTS.includes(department)) {
-    conditions.push('s.department = ?');
+    conditions.push('a.department = ?');
     params.push(department);
   }
   if (employeeId) {
-    conditions.push('s.employee_id = ?');
+    conditions.push('a.employee_id = ?');
     params.push(employeeId);
   }
   if (from) {
-    conditions.push('s.shift_date >= ?');
-    params.push(from);
+    conditions.push('a.clock_in >= ?');
+    params.push(`${from} 00:00:00`);
   }
   if (to) {
-    conditions.push('s.shift_date <= ?');
-    params.push(to);
+    conditions.push('a.clock_in <= ?');
+    params.push(`${to} 23:59:59`);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = await db.prepare(`
-    SELECT s.*, e.full_name AS employee_name
-    FROM shifts s
-    JOIN employees e ON e.id = s.employee_id
+    SELECT a.*, e.full_name AS employee_name
+    FROM attendance a
+    JOIN employees e ON e.id = a.employee_id
     ${where}
-    ORDER BY s.shift_date ASC, s.start_time ASC
+    ORDER BY a.clock_in DESC
+    LIMIT 500
   `).all(...params);
   res.json(rows);
 });
 
-// Dos horarios "HH:MM" en el mismo día se superponen si arranca uno
-// antes de que termine el otro y viceversa. Al estar en formato de 24hs
-// con cero a la izquierda, la comparación de strings ya da el orden
-// cronológico correcto sin necesidad de parsear a Date.
-async function hasShiftOverlap(employeeId, shiftDate, startTime, endTime, excludeId) {
-  const rows = await db.prepare(
-    'SELECT id, start_time, end_time FROM shifts WHERE employee_id = ? AND shift_date = ?',
-  ).all(employeeId, shiftDate);
-  return rows.some((r) => (
-    (!excludeId || r.id !== Number(excludeId)) && startTime < r.end_time && r.start_time < endTime
-  ));
-}
-
-app.post('/api/shifts', requireAuth, async (req, res) => {
-  const { employeeId, shiftDate, startTime, endTime, notes } = req.body || {};
-  if (!employeeId || !shiftDate || !startTime || !endTime) {
-    return res.status(400).json({ error: 'Empleado, fecha y horario son requeridos' });
-  }
-
-  const employee = await getEmployeeWithAccess(req, res, employeeId);
-  if (!employee) return;
-
-  if (await hasShiftOverlap(employee.id, shiftDate, startTime, endTime)) {
-    return res.status(409).json({ error: 'overlap', message: `${employee.full_name} ya tiene un turno asignado el ${shiftDate} que se superpone con ese horario` });
-  }
-
-  const info = await db.prepare(`
-    INSERT INTO shifts (employee_id, department, shift_date, start_time, end_time, notes, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(employee.id, employee.department, shiftDate, startTime, endTime, (notes || '').trim() || null, req.session.adminUser);
-
-  res.status(201).json({ id: info.lastInsertRowid });
-});
-
-app.patch('/api/shifts/:id', requireAuth, async (req, res) => {
-  const row = await db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id);
+app.patch('/api/attendance/:id', requireAuth, requireAttendanceAccess, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrado' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
-  const { shiftDate, startTime, endTime, notes } = req.body || {};
-  const nextDate = shiftDate || row.shift_date;
-  const nextStart = startTime || row.start_time;
-  const nextEnd = endTime || row.end_time;
-
-  if (await hasShiftOverlap(row.employee_id, nextDate, nextStart, nextEnd, row.id)) {
-    return res.status(409).json({ error: 'overlap', message: 'Ese horario se superpone con otro turno ya asignado a este empleado' });
-  }
-
-  await db.prepare(`
-    UPDATE shifts SET shift_date = ?, start_time = ?, end_time = ?, notes = ?
-    WHERE id = ?
-  `).run(
-    nextDate,
-    nextStart,
-    nextEnd,
-    notes !== undefined ? ((notes || '').trim() || null) : row.notes,
+  const { clockIn, clockOut } = req.body || {};
+  await db.prepare('UPDATE attendance SET clock_in = ?, clock_out = ? WHERE id = ?').run(
+    clockIn || row.clock_in,
+    clockOut !== undefined ? (clockOut || null) : row.clock_out,
     req.params.id,
   );
-
   res.json({ ok: true });
 });
 
-app.delete('/api/shifts/:id', requireAuth, async (req, res) => {
-  const row = await db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id);
+app.delete('/api/attendance/:id', requireAuth, requireAttendanceAccess, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrado' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
-  await db.prepare('DELETE FROM shifts WHERE id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM attendance WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 

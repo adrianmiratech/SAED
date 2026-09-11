@@ -32,6 +32,14 @@ function prepare(sql) {
   };
 }
 
+async function ensureColumn(table, columnDef) {
+  try {
+    await client.execute(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+  } catch (err) {
+    if (!/duplicate column name/i.test(err.message)) throw err;
+  }
+}
+
 let readyPromise = null;
 
 // Todas las rutas esperan esto antes de tocar la base: crea las tablas si
@@ -112,16 +120,19 @@ async function setup() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS shifts (
+    CREATE TABLE IF NOT EXISTS employee_roles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      department TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS attendance (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       employee_id INTEGER NOT NULL REFERENCES employees(id),
       department TEXT NOT NULL,
-      shift_date TEXT NOT NULL,
-      start_time TEXT NOT NULL,
-      end_time TEXT NOT NULL,
-      notes TEXT,
-      created_by TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      clock_in TEXT NOT NULL DEFAULT (datetime('now')),
+      clock_out TEXT
     );
 
     CREATE TABLE IF NOT EXISTS inventory_items (
@@ -163,6 +174,28 @@ async function setup() {
       updated_at TEXT
     );
   `);
+
+  // employees y admins ya existían con datos reales antes de sumar estas
+  // columnas, así que a diferencia de las tablas de arriba no alcanza con
+  // "IF NOT EXISTS": hay que intentar el ALTER TABLE e ignorar el error si
+  // la columna ya está (SQLite no tiene "ADD COLUMN IF NOT EXISTS").
+  await ensureColumn('employees', 'username TEXT');
+  await ensureColumn('employees', 'password_hash TEXT');
+  await ensureColumn('employees', 'role_id INTEGER REFERENCES employee_roles(id)');
+  await ensureColumn('admins', 'hr_access INTEGER NOT NULL DEFAULT 0');
+  // Índice único parcial-friendly: SQLite trata cada NULL como distinto en
+  // un UNIQUE INDEX, así que varios empleados sin usuario de fichaje conviven bien.
+  await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_username ON employees(username)');
+
+  // Siembra los roles/divisiones del SAED si la tabla está vacía. Son
+  // compartidos por ambos departamentos (no van atados a SAMS o SAFD).
+  const roleCount = (await prepare('SELECT COUNT(*) AS c FROM employee_roles').get()).c;
+  if (roleCount === 0) {
+    const seedRoles = ['RTD (Recruitment and Training Division)', 'Recursos Humanos', 'Dirección', 'Estudiantes'];
+    for (const name of seedRoles) {
+      await prepare('INSERT INTO employee_roles (name, department) VALUES (?, NULL)').run(name);
+    }
+  }
 
   // Siembra los rangos oficiales del SAED si la tabla está vacía. Los
   // niveles 9, 8 y 0 son compartidos por ambos departamentos; el resto

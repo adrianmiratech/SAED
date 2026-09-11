@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SAED - Mi Fichaje</title>
+  <link rel="icon" type="image/png" href="img/sams-logo.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">
+      <span class="brand-mark">🕒</span>
+      <span class="brand-text">
+        <span class="name">SAED</span>
+        <span class="tagline">Fichaje de Personal</span>
+      </span>
+    </div>
+    <div class="top-actions">
+      <div class="user-chip">
+        <span class="user-chip-avatar" id="whoami-avatar"></span>
+        <span class="user-chip-info">
+          <span class="user-chip-name" id="whoami"></span>
+          <span class="user-chip-scope" id="whoami-scope"></span>
+        </span>
+      </div>
+      <button id="logout-btn" class="btn-logout btn-sm">Cerrar sesión</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="card clock-card">
+      <div class="clock-status" id="clock-status">Consultando estado…</div>
+      <div class="clock-since" id="clock-since"></div>
+      <button id="clock-btn" class="btn-primary clock-btn" disabled>Cargando…</button>
+      <div id="clock-message" class="message"></div>
+    </div>
+
+    <div class="card">
+      <h3 class="modal-section-title" style="margin-top:0; padding-top:0; border-top:none;">Mi historial de fichajes</h3>
+      <div id="history-list" class="staff-list"></div>
+      <div id="history-empty" class="empty-state" style="display:none">
+        <div class="empty-icon">🕒</div>
+        <p>Todavía no fichaste ninguna entrada.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="js/fichaje.js"></script>
+</body>
+</html>

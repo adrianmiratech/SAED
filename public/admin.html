@@ -29,7 +29,7 @@
 
         <span class="sidebar-section-label">Recursos humanos</span>
         <button class="sidebar-link tab-btn" data-tab="personal"><span class="sidebar-link-icon">👥</span> Personal</button>
-        <button class="sidebar-link tab-btn" data-tab="turnos"><span class="sidebar-link-icon">🕒</span> Turnos</button>
+        <button class="sidebar-link tab-btn" data-tab="fichajes" id="fichajes-nav-btn" style="display:none"><span class="sidebar-link-icon">🕒</span> Fichajes</button>
 
         <span class="sidebar-section-label">Operaciones sanitarias</span>
         <button class="sidebar-link tab-btn" data-tab="inventario"><span class="sidebar-link-icon">💊</span> Inventario</button>
@@ -155,6 +155,7 @@
             </div>
             <div class="toolbar">
               <button id="rates-btn" class="btn btn-ghost btn-sm" style="display:none">Configurar tarifas por rango</button>
+              <button id="roles-btn" class="btn btn-ghost btn-sm" style="display:none">Gestionar roles</button>
               <input type="text" id="personal-search-input" class="search-input" placeholder="Buscar por nombre, teléfono o Discord..." />
               <span style="flex:1"></span>
               <button id="new-employee-btn" class="btn-primary btn-sm">+ Nuevo empleado</button>
@@ -172,65 +173,55 @@
           </div>
         </div>
 
-        <div id="tab-turnos" style="display:none">
-          <div class="stats-grid" id="shifts-stats-grid">
+        <div id="tab-fichajes" style="display:none">
+          <div class="stats-grid" id="attendance-stats-grid">
             <div class="stat-card">
-              <div class="stat-value" id="sstat-total">–</div>
-              <div class="stat-label">Turnos totales</div>
+              <div class="stat-value" id="astat-total">–</div>
+              <div class="stat-label">Fichajes</div>
             </div>
             <div class="stat-card stat-aprobado">
-              <div class="stat-value" id="sstat-today">–</div>
-              <div class="stat-label">Turnos hoy</div>
+              <div class="stat-value" id="astat-active">–</div>
+              <div class="stat-label">Fichados ahora</div>
             </div>
             <div class="stat-card stat-pendiente">
-              <div class="stat-value" id="sstat-upcoming">–</div>
-              <div class="stat-label">Próximos 7 días</div>
+              <div class="stat-value" id="astat-today">–</div>
+              <div class="stat-label">Entradas hoy</div>
             </div>
           </div>
 
           <div class="card">
-            <div class="toolbar" id="shifts-dept-filter-row">
-              <button class="btn shifts-dept-filter-btn active" data-department="">Todos los departamentos</button>
-              <button class="btn shifts-dept-filter-btn" data-department="sams">SAMS</button>
-              <button class="btn shifts-dept-filter-btn" data-department="safd">SAFD</button>
+            <div class="toolbar" id="attendance-dept-filter-row">
+              <button class="btn attendance-dept-filter-btn active" data-department="">Todos los departamentos</button>
+              <button class="btn attendance-dept-filter-btn" data-department="sams">SAMS</button>
+              <button class="btn attendance-dept-filter-btn" data-department="safd">SAFD</button>
             </div>
             <div class="toolbar">
-              <button class="btn shifts-view-btn active" data-view="list">Lista</button>
-              <button class="btn shifts-view-btn" data-view="calendar">Calendario</button>
-              <input type="text" id="shifts-search-input" class="search-input" placeholder="Buscar por empleado..." />
-              <span style="flex:1"></span>
-              <button id="new-shift-btn" class="btn-primary btn-sm">+ Nuevo turno</button>
+              <input type="text" id="attendance-search-input" class="search-input" placeholder="Buscar por empleado..." />
+              <label class="date-range-label" for="attendance-from-input">Desde</label>
+              <input type="date" id="attendance-from-input" />
+              <label class="date-range-label" for="attendance-to-input">Hasta</label>
+              <input type="date" id="attendance-to-input" />
+              <button id="attendance-date-clear-btn" class="btn btn-ghost btn-sm">Limpiar fechas</button>
             </div>
 
-            <div id="shifts-list-view">
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Fecha</th>
-                      <th>Horario</th>
-                      <th>Empleado</th>
-                      <th>Departamento</th>
-                      <th>Notas</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="shifts-table-body"></tbody>
-                </table>
-                <div id="shifts-empty" class="empty-state" style="display:none">
-                  <div class="empty-icon">🕒</div>
-                  <p>No hay turnos cargados en esta categoría.</p>
-                </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Empleado</th>
+                    <th>Departamento</th>
+                    <th>Entrada</th>
+                    <th>Salida</th>
+                    <th>Duración</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="attendance-table-body"></tbody>
+              </table>
+              <div id="attendance-empty" class="empty-state" style="display:none">
+                <div class="empty-icon">🕒</div>
+                <p>No hay fichajes registrados en esta categoría.</p>
               </div>
-            </div>
-
-            <div id="shifts-calendar-view" style="display:none">
-              <div class="toolbar">
-                <button id="shifts-week-prev" class="btn btn-ghost btn-sm">‹ Semana anterior</button>
-                <span id="shifts-week-label" class="calendar-week-label"></span>
-                <button id="shifts-week-next" class="btn btn-ghost btn-sm">Semana siguiente ›</button>
-              </div>
-              <div class="calendar-week" id="shifts-calendar-grid"></div>
             </div>
           </div>
         </div>
@@ -388,6 +379,9 @@
         <label for="employee-rank">Rango</label>
         <select id="employee-rank"></select>
 
+        <label for="employee-role">Rol / división <span class="hint">(opcional)</span></label>
+        <select id="employee-role"><option value="">Sin rol asignado</option></select>
+
         <label class="active-check-label" for="employee-active" id="employee-active-field" style="display:none">
           <input type="checkbox" id="employee-active" style="width:auto" /> Empleado activo
         </label>
@@ -397,6 +391,25 @@
         </div>
         <div id="employee-message" class="message"></div>
       </form>
+
+      <div id="employee-fichaje-section" style="display:none">
+        <h3 class="modal-section-title">Acceso de fichaje</h3>
+        <p class="subtitle" id="employee-fichaje-status">Este empleado todavía no tiene acceso para fichar.</p>
+        <div class="row">
+          <div>
+            <label for="employee-fichaje-username">Usuario</label>
+            <input type="text" id="employee-fichaje-username" autocomplete="off" placeholder="Ej: jperez" />
+          </div>
+          <div>
+            <label for="employee-fichaje-password">Contraseña <span class="hint">(vacío = no cambiarla)</span></label>
+            <input type="password" id="employee-fichaje-password" autocomplete="new-password" minlength="6" />
+          </div>
+        </div>
+        <div class="submit-row">
+          <button type="button" id="employee-fichaje-save-btn" class="btn-primary btn-sm">Guardar acceso</button>
+        </div>
+        <div id="employee-fichaje-message" class="message"></div>
+      </div>
 
       <div id="employee-payroll-section" style="display:none">
         <h3 class="modal-section-title">Registrar horas</h3>
@@ -437,6 +450,46 @@
       <div id="rates-list" class="staff-list"></div>
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="rates-modal-close">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="roles-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2>Roles y divisiones</h2>
+          <p class="subtitle">Etiquetas organizativas (ej: RTD, Recursos Humanos, Dirección, Estudiantes) que se pueden asignar a cualquier empleado además de su rango.</p>
+        </div>
+      </div>
+
+      <h3 class="modal-section-title">Nuevo rol</h3>
+      <form id="role-form">
+        <div class="row">
+          <div>
+            <label for="role-name">Nombre</label>
+            <input type="text" id="role-name" required placeholder="Ej: RTD (Recruitment and Training Division)" />
+          </div>
+          <div>
+            <label for="role-department">Departamento <span class="hint">(opcional)</span></label>
+            <select id="role-department">
+              <option value="">Compartido (SAMS y SAFD)</option>
+              <option value="sams">Solo SAMS</option>
+              <option value="safd">Solo SAFD</option>
+            </select>
+          </div>
+        </div>
+        <div class="submit-row">
+          <button type="submit" class="btn-primary btn-sm">Crear rol</button>
+        </div>
+        <div id="role-message" class="message"></div>
+      </form>
+
+      <h3 class="modal-section-title">Roles existentes</h3>
+      <div id="roles-list" class="staff-list"></div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="roles-modal-close">Cerrar</button>
       </div>
     </div>
   </div>
@@ -519,6 +572,11 @@
           <option value="sams">SAMS</option>
           <option value="safd">SAFD</option>
         </select>
+
+        <label class="active-check-label" for="staff-hr-access">
+          <input type="checkbox" id="staff-hr-access" style="width:auto" /> Acceso a fichajes (RRHH / Dirección)
+        </label>
+
         <div class="submit-row">
           <button type="submit" class="btn-primary">Crear usuario</button>
         </div>
@@ -530,67 +588,6 @@
 
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="staff-modal-close">Cerrar</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="shift-modal-backdrop">
-    <div class="modal">
-      <div class="modal-header">
-        <div>
-          <h2 id="shift-modal-title">Nuevo turno</h2>
-          <p class="subtitle">Asigná un turno de guardia a un integrante del personal.</p>
-        </div>
-      </div>
-
-      <form id="shift-form">
-        <label for="shift-employee">Empleado</label>
-        <select id="shift-employee" required></select>
-
-        <label for="shift-date">Fecha</label>
-        <input type="date" id="shift-date" required />
-
-        <div class="row">
-          <div>
-            <label for="shift-start">Hora de inicio</label>
-            <input type="time" id="shift-start" required />
-          </div>
-          <div>
-            <label for="shift-end">Hora de fin</label>
-            <input type="time" id="shift-end" required />
-          </div>
-        </div>
-
-        <label for="shift-notes">Notas <span class="hint">(opcional)</span></label>
-        <textarea id="shift-notes" placeholder="Ej: Cobertura zona norte"></textarea>
-
-        <label class="active-check-label" for="shift-recurring" id="shift-recurring-field">
-          <input type="checkbox" id="shift-recurring" style="width:auto" /> Repetir este turno en más días
-        </label>
-        <div id="shift-recurrence-fields" style="display:none">
-          <label>Repetir los días</label>
-          <div class="radio-group weekday-check-group">
-            <label><input type="checkbox" value="1" /> Lun</label>
-            <label><input type="checkbox" value="2" /> Mar</label>
-            <label><input type="checkbox" value="3" /> Mié</label>
-            <label><input type="checkbox" value="4" /> Jue</label>
-            <label><input type="checkbox" value="5" /> Vie</label>
-            <label><input type="checkbox" value="6" /> Sáb</label>
-            <label><input type="checkbox" value="0" /> Dom</label>
-          </div>
-          <label for="shift-recurring-until">Repetir hasta (inclusive)</label>
-          <input type="date" id="shift-recurring-until" />
-        </div>
-
-        <div class="submit-row">
-          <button type="submit" class="btn-primary" id="shift-form-submit">Crear turno</button>
-        </div>
-        <div id="shift-message" class="message"></div>
-      </form>
-
-      <div class="modal-actions">
-        <button class="btn btn-ghost btn-sm" id="shift-modal-close">Cerrar</button>
-        <button class="btn btn-danger btn-sm" id="shift-delete-btn" style="display:none">Eliminar turno</button>
       </div>
     </div>
   </div>

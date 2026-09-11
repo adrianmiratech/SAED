@@ -5,6 +5,7 @@ let currentSearch = '';
 let currentId = null;
 let scopedDepartment = null;
 let currentUsername = null;
+let hasHrAccess = false;
 
 let ranks = [];
 let employees = [];
@@ -16,8 +17,8 @@ const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 const STATUS_LABELS = { pendiente: 'Pendiente', en_revision: 'En revisión', aprobado: 'Aprobado', rechazado: 'Rechazado' };
 const PAGE_TITLES = {
   postulaciones: ['Postulaciones', 'Revisá, filtrá y gestioná las postulaciones a SAMS y SAFD.'],
-  personal: ['Personal', 'Roster de empleados, rangos y nómina del SAED.'],
-  turnos: ['Turnos', 'Calendario de guardias asignadas al personal del SAED.'],
+  personal: ['Personal', 'Roster de empleados, rangos, roles y nómina del SAED.'],
+  fichajes: ['Fichajes', 'Control de entrada y salida del personal.'],
   inventario: ['Inventario', 'Stock de insumos y medicamentos de SAMS y SAFD.'],
   atenciones: ['Atenciones', 'Fichas de pacientes e informes de intervención.'],
 };
@@ -68,6 +69,7 @@ async function checkSession() {
   }
   scopedDepartment = data.department || null;
   currentUsername = data.username;
+  hasHrAccess = !!data.hrAccess;
   whoamiEl.textContent = data.username;
   document.getElementById('whoami-avatar').textContent = initials(data.username);
   document.getElementById('whoami-scope').textContent = scopedDepartment
@@ -84,8 +86,8 @@ async function checkSession() {
     currentPersonalDeptFilter = scopedDepartment;
     employeeDepartmentField.style.display = 'none';
 
-    document.getElementById('shifts-dept-filter-row').style.display = 'none';
-    currentShiftsDeptFilter = scopedDepartment;
+    document.getElementById('attendance-dept-filter-row').style.display = 'none';
+    currentAttendanceDeptFilter = scopedDepartment;
 
     document.getElementById('inventory-dept-filter-row').style.display = 'none';
     currentInventoryDeptFilter = scopedDepartment;
@@ -93,10 +95,17 @@ async function checkSession() {
     document.getElementById('cases-dept-filter-row').style.display = 'none';
     currentCasesDeptFilter = scopedDepartment;
   } else {
-    // Solo el staff sin departamento asignado gestiona otras cuentas y
-    // define las tarifas de pago por rango.
+    // Solo el staff sin departamento asignado gestiona otras cuentas,
+    // define las tarifas de pago por rango y administra los roles.
     manageStaffBtn.style.display = 'inline-flex';
     ratesBtn.style.display = 'inline-flex';
+    document.getElementById('roles-btn').style.display = 'inline-flex';
+  }
+
+  // Fichajes: solo lo ve el staff sin departamento (nivel SAED) o quien
+  // tenga el permiso explícito de RRHH/Dirección.
+  if (!scopedDepartment || hasHrAccess) {
+    document.getElementById('fichajes-nav-btn').style.display = 'flex';
   }
 }
 
@@ -278,6 +287,7 @@ function renderStaffList(staff) {
       <div class="staff-meta">
         <span class="staff-username">${escapeHtml(s.username)}</span>
         ${deptBadge}
+        <button class="status-pill ${s.hr_access ? 'status-aprobado' : 'status-pendiente'}" style="border:none;cursor:pointer" data-toggle-hr="${s.id}" data-hr="${s.hr_access ? '0' : '1'}">${s.hr_access ? 'RRHH/Dirección ✓' : 'Sin acceso a fichajes'}</button>
       </div>
       <button class="btn btn-danger btn-sm" data-delete-staff="${s.id}" ${s.username === currentUsername ? 'disabled' : ''}>Eliminar</button>
     `;
@@ -286,6 +296,16 @@ function renderStaffList(staff) {
 
   staffList.querySelectorAll('[data-delete-staff]').forEach((btn) => {
     btn.addEventListener('click', () => deleteStaff(btn.dataset.deleteStaff));
+  });
+  staffList.querySelectorAll('[data-toggle-hr]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await fetch(`/api/admins/${btn.dataset.toggleHr}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hrAccess: btn.dataset.hr === '1' }),
+      });
+      loadStaff();
+    });
   });
 }
 
@@ -321,6 +341,7 @@ staffForm.addEventListener('submit', async (e) => {
   const username = document.getElementById('staff-username').value.trim();
   const password = document.getElementById('staff-password').value;
   const department = document.getElementById('staff-department').value;
+  const hrAccess = document.getElementById('staff-hr-access').checked;
 
   const submitBtn = staffForm.querySelector('button[type="submit"]');
   submitBtn.disabled = true;
@@ -329,7 +350,7 @@ staffForm.addEventListener('submit', async (e) => {
     const res = await fetch('/api/admins', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, department: department || undefined }),
+      body: JSON.stringify({ username, password, department: department || undefined, hrAccess }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo crear el usuario');
@@ -451,7 +472,7 @@ document.getElementById('export-btn').addEventListener('click', () => {
 
 // ---------- Navegación entre módulos (sidebar) ----------
 
-const TAB_IDS = ['postulaciones', 'personal', 'turnos', 'inventario', 'atenciones'];
+const TAB_IDS = ['postulaciones', 'personal', 'fichajes', 'inventario', 'atenciones'];
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
@@ -470,10 +491,10 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 
     if (tab === 'personal') {
       if (ranks.length === 0) loadRanks();
+      if (employeeRoles.length === 0) loadEmployeeRoles();
       loadEmployees();
-    } else if (tab === 'turnos') {
-      if (employees.length === 0) await loadEmployees();
-      loadShifts();
+    } else if (tab === 'fichajes') {
+      loadAttendance();
     } else if (tab === 'inventario') {
       loadInventory();
     } else if (tab === 'atenciones') {
@@ -517,6 +538,107 @@ function populateRankSelect(department, selectedRankId, selectEl = employeeRankS
 
 employeeDepartmentSelect.addEventListener('change', () => {
   populateRankSelect(employeeDepartmentSelect.value);
+  populateRoleSelect(employeeDepartmentSelect.value);
+});
+
+// ---------- Roles / divisiones ----------
+
+let employeeRoles = [];
+const employeeRoleSelect = document.getElementById('employee-role');
+const rolesBtn = document.getElementById('roles-btn');
+const rolesModalBackdrop = document.getElementById('roles-modal-backdrop');
+const rolesListEl = document.getElementById('roles-list');
+const roleForm = document.getElementById('role-form');
+const roleMessage = document.getElementById('role-message');
+
+async function loadEmployeeRoles() {
+  const res = await fetch('/api/employee-roles');
+  if (!res.ok) return;
+  employeeRoles = await res.json();
+}
+
+function rolesForDepartment(department) {
+  return employeeRoles.filter((r) => !r.department || r.department === department);
+}
+
+function populateRoleSelect(department, selectedRoleId) {
+  const list = rolesForDepartment(department);
+  employeeRoleSelect.innerHTML = '<option value="">Sin rol asignado</option>' + list.map((r) => (
+    `<option value="${r.id}">${escapeHtml(r.name)}</option>`
+  )).join('');
+  employeeRoleSelect.value = selectedRoleId || '';
+}
+
+async function openRolesModal() {
+  await loadEmployeeRoles();
+  renderRolesList();
+  roleMessage.className = 'message';
+  roleMessage.textContent = '';
+  roleForm.reset();
+  rolesModalBackdrop.classList.add('open');
+}
+
+function renderRolesList() {
+  if (employeeRoles.length === 0) {
+    rolesListEl.innerHTML = '<div class="staff-empty">No hay roles cargados.</div>';
+    return;
+  }
+  rolesListEl.innerHTML = employeeRoles.map((r) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(r.name)}</span>
+        ${r.department ? `<span class="dept-badge dept-${r.department}">${departmentLabel(r.department)}</span>` : '<span class="dept-badge">Compartido</span>'}
+      </div>
+      <button class="btn btn-danger btn-sm" data-delete-role="${r.id}">Eliminar</button>
+    </div>
+  `).join('');
+
+  rolesListEl.querySelectorAll('[data-delete-role]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este rol? Los empleados que lo tenían quedarán sin rol asignado.')) return;
+      await fetch(`/api/employee-roles/${btn.dataset.deleteRole}`, { method: 'DELETE' });
+      await loadEmployeeRoles();
+      renderRolesList();
+      showToast('Rol eliminado.', 'danger');
+    });
+  });
+}
+
+function closeRolesModal() {
+  rolesModalBackdrop.classList.remove('open');
+}
+
+roleForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  roleMessage.className = 'message';
+  roleMessage.textContent = '';
+
+  const name = document.getElementById('role-name').value.trim();
+  const department = document.getElementById('role-department').value;
+
+  try {
+    const res = await fetch('/api/employee-roles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, department: department || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo crear el rol');
+
+    roleForm.reset();
+    await loadEmployeeRoles();
+    renderRolesList();
+    showToast(`Rol "${data.name}" creado.`);
+  } catch (err) {
+    roleMessage.className = 'message error';
+    roleMessage.textContent = err.message;
+  }
+});
+
+rolesBtn.addEventListener('click', openRolesModal);
+document.getElementById('roles-modal-close').addEventListener('click', closeRolesModal);
+rolesModalBackdrop.addEventListener('click', (e) => {
+  if (e.target === rolesModalBackdrop) closeRolesModal();
 });
 
 const RANK_TIERS = [
@@ -659,6 +781,10 @@ function resetEmployeeForm() {
   employeeMessage.textContent = '';
   payrollMessage.className = 'message';
   payrollMessage.textContent = '';
+  document.getElementById('employee-fichaje-username').value = '';
+  document.getElementById('employee-fichaje-password').value = '';
+  document.getElementById('employee-fichaje-message').className = 'message';
+  document.getElementById('employee-fichaje-message').textContent = '';
 }
 
 function openNewEmployeeModal() {
@@ -673,6 +799,7 @@ function openNewEmployeeModal() {
   employeeDeleteBtn.style.display = 'none';
   employeeActiveField.style.display = 'none';
   employeePayrollSection.style.display = 'none';
+  document.getElementById('employee-fichaje-section').style.display = 'none';
   employeeDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
 
   // Si hay un filtro de departamento activo, el nuevo empleado arranca en
@@ -680,6 +807,7 @@ function openNewEmployeeModal() {
   const initialDept = scopedDepartment || currentPersonalDeptFilter || 'sams';
   employeeDepartmentSelect.value = initialDept;
   populateRankSelect(initialDept);
+  populateRoleSelect(initialDept);
 
   employeeModalBackdrop.classList.add('open');
 }
@@ -702,12 +830,18 @@ async function openEmployeeModal(id) {
   employeeActiveField.style.display = 'flex';
   employeePayrollSection.style.display = 'block';
   employeeDepartmentField.style.display = 'none';
+  document.getElementById('employee-fichaje-section').style.display = 'block';
+  document.getElementById('employee-fichaje-status').textContent = e.has_login
+    ? `Ya puede fichar con el usuario "${e.username}".`
+    : 'Este empleado todavía no tiene acceso para fichar.';
+  document.getElementById('employee-fichaje-username').value = e.username || '';
 
   document.getElementById('employee-fullname').value = e.full_name;
   document.getElementById('employee-phone').value = e.phone || '';
   document.getElementById('employee-discord').value = e.discord_info || '';
   employeeActiveCheckbox.checked = !!e.active;
   populateRankSelect(e.department, e.rank_id);
+  populateRoleSelect(e.department, e.role_id);
 
   employeeModalBackdrop.classList.add('open');
   await loadPayroll(id);
@@ -727,6 +861,7 @@ employeeForm.addEventListener('submit', async (e) => {
   const phone = document.getElementById('employee-phone').value.trim();
   const discordInfo = document.getElementById('employee-discord').value.trim();
   const rankId = Number(employeeRankSelect.value);
+  const roleId = employeeRoleSelect.value || null;
   const department = scopedDepartment || employeeDepartmentSelect.value;
 
   const submitBtn = employeeFormSubmit;
@@ -737,8 +872,8 @@ employeeForm.addEventListener('submit', async (e) => {
     const url = isEdit ? `/api/employees/${currentEmployeeId}` : '/api/employees';
     const method = isEdit ? 'PATCH' : 'POST';
     const body = isEdit
-      ? { fullName, phone, discordInfo, rankId, active: employeeActiveCheckbox.checked }
-      : { fullName, phone, discordInfo, rankId, department };
+      ? { fullName, phone, discordInfo, rankId, roleId, active: employeeActiveCheckbox.checked }
+      : { fullName, phone, discordInfo, rankId, roleId, department };
 
     const res = await fetch(url, {
       method,
@@ -770,6 +905,37 @@ employeeForm.addEventListener('submit', async (e) => {
     employeeMessage.textContent = err.message;
   } finally {
     submitBtn.disabled = false;
+  }
+});
+
+document.getElementById('employee-fichaje-save-btn').addEventListener('click', async () => {
+  if (!currentEmployeeId) return;
+  const fichajeMessage = document.getElementById('employee-fichaje-message');
+  fichajeMessage.className = 'message';
+  fichajeMessage.textContent = '';
+
+  const fichajeUsername = document.getElementById('employee-fichaje-username').value.trim();
+  const fichajePassword = document.getElementById('employee-fichaje-password').value;
+
+  try {
+    const res = await fetch(`/api/employees/${currentEmployeeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fichajeUsername, fichajePassword: fichajePassword || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el acceso de fichaje');
+
+    document.getElementById('employee-fichaje-password').value = '';
+    await loadEmployees();
+    const updated = employees.find((x) => x.id === currentEmployeeId);
+    document.getElementById('employee-fichaje-status').textContent = updated && updated.has_login
+      ? `Ya puede fichar con el usuario "${updated.username}".`
+      : 'Este empleado todavía no tiene acceso para fichar.';
+    showToast('Acceso de fichaje actualizado.');
+  } catch (err) {
+    fichajeMessage.className = 'message error';
+    fichajeMessage.textContent = err.message;
   }
 });
 
@@ -925,348 +1091,127 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (employeeModalBackdrop.classList.contains('open')) closeEmployeeModal();
   if (ratesModalBackdrop.classList.contains('open')) closeRatesModal();
-  if (shiftModalBackdrop.classList.contains('open')) closeShiftModal();
+  if (rolesModalBackdrop.classList.contains('open')) closeRolesModal();
   if (inventoryModalBackdrop.classList.contains('open')) closeInventoryModal();
   if (caseModalBackdrop.classList.contains('open')) closeCaseModal();
 });
 
-// ---------- Turnos ----------
+// ---------- Fichajes (vista de RRHH / Dirección) ----------
 
-let shifts = [];
-let currentShiftsDeptFilter = '';
-let currentShiftsSearch = '';
-let currentShiftId = null;
-let currentShiftsView = 'list';
-let currentShiftsWeekStart = getMonday(new Date());
+let attendanceRows = [];
+let currentAttendanceDeptFilter = '';
+let currentAttendanceSearch = '';
+let currentAttendanceFrom = '';
+let currentAttendanceTo = '';
 
-const shiftsTableBody = document.getElementById('shifts-table-body');
-const shiftsEmpty = document.getElementById('shifts-empty');
-const shiftsListView = document.getElementById('shifts-list-view');
-const shiftsCalendarView = document.getElementById('shifts-calendar-view');
-const shiftsCalendarGrid = document.getElementById('shifts-calendar-grid');
-const shiftsWeekLabel = document.getElementById('shifts-week-label');
-const shiftModalBackdrop = document.getElementById('shift-modal-backdrop');
-const shiftForm = document.getElementById('shift-form');
-const shiftMessage = document.getElementById('shift-message');
-const shiftEmployeeSelect = document.getElementById('shift-employee');
-const shiftFormSubmit = document.getElementById('shift-form-submit');
-const shiftDeleteBtn = document.getElementById('shift-delete-btn');
-const shiftRecurringField = document.getElementById('shift-recurring-field');
-const shiftRecurringCheckbox = document.getElementById('shift-recurring');
-const shiftRecurrenceFields = document.getElementById('shift-recurrence-fields');
-const shiftRecurringUntil = document.getElementById('shift-recurring-until');
+const attendanceTableBody = document.getElementById('attendance-table-body');
+const attendanceEmpty = document.getElementById('attendance-empty');
 
-function getMonday(date) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function toDateInputValue(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-async function loadShifts() {
+async function loadAttendance() {
   const params = new URLSearchParams();
-  if (currentShiftsDeptFilter) params.set('department', currentShiftsDeptFilter);
+  if (currentAttendanceDeptFilter) params.set('department', currentAttendanceDeptFilter);
+  if (currentAttendanceFrom) params.set('from', currentAttendanceFrom);
+  if (currentAttendanceTo) params.set('to', currentAttendanceTo);
   const query = params.toString();
-  const res = await fetch(query ? `/api/shifts?${query}` : '/api/shifts');
+  const res = await fetch(query ? `/api/attendance?${query}` : '/api/attendance');
   if (res.status === 401) { window.location.href = '/login.html'; return; }
-  shifts = await res.json();
-  renderShiftsStats();
-  renderShiftsTable();
-  if (currentShiftsView === 'calendar') renderShiftsCalendar();
-}
-
-function renderShiftsStats() {
-  document.getElementById('sstat-total').textContent = shifts.length;
-  const today = new Date().toISOString().slice(0, 10);
-  document.getElementById('sstat-today').textContent = shifts.filter((s) => s.shift_date === today).length;
-  const in7 = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  document.getElementById('sstat-upcoming').textContent = shifts.filter((s) => s.shift_date >= today && s.shift_date <= in7).length;
-}
-
-function getFilteredShifts() {
-  if (!currentShiftsSearch) return shifts;
-  const term = currentShiftsSearch.toLowerCase();
-  return shifts.filter((s) => s.employee_name.toLowerCase().includes(term));
-}
-
-function renderShiftsTable() {
-  const rows = getFilteredShifts();
-  shiftsTableBody.innerHTML = '';
-  if (rows.length === 0) {
-    shiftsEmpty.style.display = 'block';
+  if (res.status === 403) {
+    attendanceRows = [];
+    renderAttendanceStats();
+    attendanceTableBody.innerHTML = '';
+    attendanceEmpty.style.display = 'block';
+    attendanceEmpty.querySelector('p').textContent = 'No tenés acceso para ver los fichajes del personal.';
     return;
   }
-  shiftsEmpty.style.display = 'none';
+  attendanceRows = await res.json();
+  renderAttendanceStats();
+  renderAttendanceTable();
+}
 
-  for (const s of rows) {
+function renderAttendanceStats() {
+  document.getElementById('astat-total').textContent = attendanceRows.length;
+  document.getElementById('astat-active').textContent = attendanceRows.filter((a) => !a.clock_out).length;
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('astat-today').textContent = attendanceRows.filter((a) => a.clock_in.slice(0, 10) === today).length;
+}
+
+function getFilteredAttendance() {
+  if (!currentAttendanceSearch) return attendanceRows;
+  const term = currentAttendanceSearch.toLowerCase();
+  return attendanceRows.filter((a) => a.employee_name.toLowerCase().includes(term));
+}
+
+function attendanceDuration(clockIn, clockOut) {
+  const start = new Date(`${clockIn.replace(' ', 'T')}Z`);
+  const end = clockOut ? new Date(`${clockOut.replace(' ', 'T')}Z`) : new Date();
+  const minutes = Math.max(0, Math.round((end - start) / 60000));
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function renderAttendanceTable() {
+  const rows = getFilteredAttendance();
+  attendanceTableBody.innerHTML = '';
+  if (rows.length === 0) {
+    attendanceEmpty.style.display = 'block';
+    attendanceEmpty.querySelector('p').textContent = 'No hay fichajes registrados en esta categoría.';
+    return;
+  }
+  attendanceEmpty.style.display = 'none';
+
+  for (const a of rows) {
     const tr = document.createElement('tr');
-    tr.className = 'row-link';
     tr.innerHTML = `
-      <td>${s.shift_date}</td>
-      <td>${s.start_time} – ${s.end_time}</td>
-      <td>${escapeHtml(s.employee_name)}</td>
-      <td><span class="dept-badge dept-${s.department}">${departmentLabel(s.department)}</span></td>
-      <td>${escapeHtml(s.notes || '—')}</td>
-      <td class="row-chevron">›</td>
+      <td>${escapeHtml(a.employee_name)}</td>
+      <td><span class="dept-badge dept-${a.department}">${departmentLabel(a.department)}</span></td>
+      <td>${formatDate(a.clock_in)}</td>
+      <td>${a.clock_out ? formatDate(a.clock_out) : '<span class="status-pill status-pendiente">En curso</span>'}</td>
+      <td>${attendanceDuration(a.clock_in, a.clock_out)}</td>
+      <td><button class="btn btn-danger btn-sm" data-delete-attendance="${a.id}">Eliminar</button></td>
     `;
-    tr.addEventListener('click', () => openShiftModal(s.id));
-    shiftsTableBody.appendChild(tr);
+    attendanceTableBody.appendChild(tr);
   }
-}
 
-const WEEKDAY_HEADERS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-
-function renderShiftsCalendar() {
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(currentShiftsWeekStart);
-    d.setDate(d.getDate() + i);
-    return d;
-  });
-
-  const rangeStart = days[0].toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
-  const rangeEnd = days[6].toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' });
-  shiftsWeekLabel.textContent = `${rangeStart} – ${rangeEnd}`;
-
-  const todayStr = toDateInputValue(new Date());
-  const filtered = getFilteredShifts();
-
-  shiftsCalendarGrid.innerHTML = days.map((d, i) => {
-    const dateStr = toDateInputValue(d);
-    const dayShifts = filtered
-      .filter((s) => s.shift_date === dateStr)
-      .sort((a, b) => a.start_time.localeCompare(b.start_time));
-    const isToday = dateStr === todayStr;
-
-    const chips = dayShifts.length === 0
-      ? '<div class="calendar-day-empty">Sin turnos</div>'
-      : dayShifts.map((s) => `
-          <div class="calendar-shift-chip" data-shift-id="${s.id}">
-            <span class="calendar-shift-time">${s.start_time}–${s.end_time}</span>
-            <span>${escapeHtml(s.employee_name)}</span>
-          </div>
-        `).join('');
-
-    return `
-      <div class="calendar-day${isToday ? ' is-today' : ''}">
-        <div class="calendar-day-header">${WEEKDAY_HEADERS[i]} ${d.getDate()}</div>
-        ${chips}
-      </div>
-    `;
-  }).join('');
-
-  shiftsCalendarGrid.querySelectorAll('[data-shift-id]').forEach((chip) => {
-    chip.addEventListener('click', () => openShiftModal(Number(chip.dataset.shiftId)));
+  attendanceTableBody.querySelectorAll('[data-delete-attendance]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este fichaje?')) return;
+      await fetch(`/api/attendance/${btn.dataset.deleteAttendance}`, { method: 'DELETE' });
+      await loadAttendance();
+      showToast('Fichaje eliminado.', 'danger');
+    });
   });
 }
 
-document.querySelectorAll('.shifts-view-btn').forEach((btn) => {
+document.getElementById('attendance-search-input').addEventListener('input', (e) => {
+  currentAttendanceSearch = e.target.value.trim();
+  renderAttendanceTable();
+});
+
+document.getElementById('attendance-from-input').addEventListener('change', (e) => {
+  currentAttendanceFrom = e.target.value;
+  loadAttendance();
+});
+
+document.getElementById('attendance-to-input').addEventListener('change', (e) => {
+  currentAttendanceTo = e.target.value;
+  loadAttendance();
+});
+
+document.getElementById('attendance-date-clear-btn').addEventListener('click', () => {
+  currentAttendanceFrom = '';
+  currentAttendanceTo = '';
+  document.getElementById('attendance-from-input').value = '';
+  document.getElementById('attendance-to-input').value = '';
+  loadAttendance();
+});
+
+document.querySelectorAll('.attendance-dept-filter-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.shifts-view-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.attendance-dept-filter-btn').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
-    currentShiftsView = btn.dataset.view;
-    shiftsListView.style.display = currentShiftsView === 'list' ? 'block' : 'none';
-    shiftsCalendarView.style.display = currentShiftsView === 'calendar' ? 'block' : 'none';
-    if (currentShiftsView === 'calendar') renderShiftsCalendar();
-  });
-});
-
-document.getElementById('shifts-week-prev').addEventListener('click', () => {
-  currentShiftsWeekStart.setDate(currentShiftsWeekStart.getDate() - 7);
-  renderShiftsCalendar();
-});
-
-document.getElementById('shifts-week-next').addEventListener('click', () => {
-  currentShiftsWeekStart.setDate(currentShiftsWeekStart.getDate() + 7);
-  renderShiftsCalendar();
-});
-
-function populateShiftEmployeeSelect() {
-  const list = currentShiftsDeptFilter ? employees.filter((e) => e.department === currentShiftsDeptFilter) : employees;
-  shiftEmployeeSelect.innerHTML = list.filter((e) => e.active).map((e) => (
-    `<option value="${e.id}">${escapeHtml(e.full_name)} (${departmentLabel(e.department)})</option>`
-  )).join('');
-}
-
-function openNewShiftModal() {
-  currentShiftId = null;
-  shiftForm.reset();
-  shiftMessage.className = 'message';
-  shiftMessage.textContent = '';
-  document.getElementById('shift-modal-title').textContent = 'Nuevo turno';
-  shiftFormSubmit.textContent = 'Crear turno';
-  shiftDeleteBtn.style.display = 'none';
-  shiftEmployeeSelect.disabled = false;
-  shiftRecurringField.style.display = 'flex';
-  shiftRecurrenceFields.style.display = 'none';
-  populateShiftEmployeeSelect();
-  shiftModalBackdrop.classList.add('open');
-}
-
-function openShiftModal(id) {
-  const s = shifts.find((x) => x.id === id);
-  if (!s) return;
-  currentShiftId = id;
-  shiftForm.reset();
-  shiftMessage.className = 'message';
-  shiftMessage.textContent = '';
-  document.getElementById('shift-modal-title').textContent = 'Editar turno';
-  shiftFormSubmit.textContent = 'Guardar cambios';
-  shiftDeleteBtn.style.display = 'inline-flex';
-  shiftRecurringField.style.display = 'none';
-  shiftRecurrenceFields.style.display = 'none';
-  populateShiftEmployeeSelect();
-
-  shiftEmployeeSelect.value = s.employee_id;
-  shiftEmployeeSelect.disabled = true;
-  document.getElementById('shift-date').value = s.shift_date;
-  document.getElementById('shift-start').value = s.start_time;
-  document.getElementById('shift-end').value = s.end_time;
-  document.getElementById('shift-notes').value = s.notes || '';
-
-  shiftModalBackdrop.classList.add('open');
-}
-
-function closeShiftModal() {
-  shiftModalBackdrop.classList.remove('open');
-  shiftEmployeeSelect.disabled = false;
-  currentShiftId = null;
-}
-
-shiftRecurringCheckbox.addEventListener('change', () => {
-  shiftRecurrenceFields.style.display = shiftRecurringCheckbox.checked ? 'block' : 'none';
-});
-
-// Junta la fecha base con todas las fechas del rango [fecha base, hasta]
-// cuyo día de semana esté tildado, sin duplicar la fecha base.
-function buildRecurringDates(baseDate, weekdayValues, until) {
-  const dates = new Set([baseDate]);
-  if (weekdayValues.length && until) {
-    const cursor = new Date(`${baseDate}T00:00:00`);
-    const end = new Date(`${until}T00:00:00`);
-    while (cursor <= end) {
-      if (weekdayValues.includes(String(cursor.getDay()))) {
-        dates.add(toDateInputValue(cursor));
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-  }
-  return Array.from(dates).sort();
-}
-
-async function createShift(body) {
-  const res = await fetch('/api/shifts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  return { ok: res.ok, data };
-}
-
-shiftForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  shiftMessage.className = 'message';
-  shiftMessage.textContent = '';
-
-  const baseBody = {
-    employeeId: Number(shiftEmployeeSelect.value),
-    startTime: document.getElementById('shift-start').value,
-    endTime: document.getElementById('shift-end').value,
-    notes: document.getElementById('shift-notes').value.trim(),
-  };
-  const shiftDate = document.getElementById('shift-date').value;
-
-  const submitBtn = shiftFormSubmit;
-  submitBtn.disabled = true;
-  try {
-    const isEdit = !!currentShiftId;
-
-    if (isEdit) {
-      const res = await fetch(`/api/shifts/${currentShiftId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...baseBody, shiftDate }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || data.error || 'No se pudo guardar el turno');
-      showToast('Turno actualizado.');
-      closeShiftModal();
-      await loadShifts();
-      return;
-    }
-
-    const isRecurring = shiftRecurringCheckbox.checked;
-    const weekdayValues = isRecurring
-      ? Array.from(document.querySelectorAll('#shift-recurrence-fields input[type="checkbox"]:checked')).map((c) => c.value)
-      : [];
-    const dates = isRecurring
-      ? buildRecurringDates(shiftDate, weekdayValues, shiftRecurringUntil.value)
-      : [shiftDate];
-
-    let created = 0;
-    const conflicts = [];
-    for (const date of dates) {
-      const { ok, data } = await createShift({ ...baseBody, shiftDate: date });
-      if (ok) {
-        created += 1;
-      } else if (data.error === 'overlap') {
-        conflicts.push(date);
-      } else {
-        throw new Error(data.error || 'No se pudo guardar el turno');
-      }
-    }
-
-    if (created === 0) {
-      throw new Error('No se pudo crear ningún turno: todas las fechas se superponen con turnos existentes.');
-    }
-
-    const summary = conflicts.length
-      ? `Se crearon ${created} turno${created === 1 ? '' : 's'}. Se omitieron ${conflicts.length} por superposición: ${conflicts.join(', ')}.`
-      : `Se ${created === 1 ? 'creó' : `crearon ${created}`} turno${created === 1 ? '' : 's'}.`;
-    showToast(summary, conflicts.length ? 'danger' : 'ok');
-    closeShiftModal();
-    await loadShifts();
-  } catch (err) {
-    shiftMessage.className = 'message error';
-    shiftMessage.textContent = err.message;
-  } finally {
-    submitBtn.disabled = false;
-  }
-});
-
-shiftDeleteBtn.addEventListener('click', async () => {
-  if (!currentShiftId) return;
-  if (!confirm('¿Eliminar este turno?')) return;
-  await fetch(`/api/shifts/${currentShiftId}`, { method: 'DELETE' });
-  closeShiftModal();
-  await loadShifts();
-  showToast('Turno eliminado.', 'danger');
-});
-
-document.getElementById('new-shift-btn').addEventListener('click', openNewShiftModal);
-document.getElementById('shift-modal-close').addEventListener('click', closeShiftModal);
-shiftModalBackdrop.addEventListener('click', (e) => {
-  if (e.target === shiftModalBackdrop) closeShiftModal();
-});
-
-document.getElementById('shifts-search-input').addEventListener('input', (e) => {
-  currentShiftsSearch = e.target.value.trim();
-  renderShiftsTable();
-  if (currentShiftsView === 'calendar') renderShiftsCalendar();
-});
-
-document.querySelectorAll('.shifts-dept-filter-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.shifts-dept-filter-btn').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentShiftsDeptFilter = btn.dataset.department;
-    loadShifts();
+    currentAttendanceDeptFilter = btn.dataset.department;
+    loadAttendance();
   });
 });
 

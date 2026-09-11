@@ -471,8 +471,7 @@ button:disabled, .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: n
 .dept-filter-btn,
 .tab-btn,
 .personal-dept-filter-btn,
-.shifts-dept-filter-btn,
-.shifts-view-btn,
+.attendance-dept-filter-btn,
 .inventory-dept-filter-btn,
 .cases-dept-filter-btn,
 .cases-status-filter-btn {
@@ -484,8 +483,7 @@ button:disabled, .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: n
 .dept-filter-btn.active,
 .tab-btn.active,
 .personal-dept-filter-btn.active,
-.shifts-dept-filter-btn.active,
-.shifts-view-btn.active,
+.attendance-dept-filter-btn.active,
 .inventory-dept-filter-btn.active,
 .cases-dept-filter-btn.active,
 .cases-status-filter-btn.active {
@@ -502,15 +500,12 @@ button:disabled, .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: n
 }
 
 input[type="date"]#cases-from-input,
-input[type="date"]#cases-to-input {
+input[type="date"]#cases-to-input,
+input[type="date"]#attendance-from-input,
+input[type="date"]#attendance-to-input {
   width: auto;
   padding: 8px 10px;
   font-size: 13px;
-}
-
-.weekday-check-group {
-  flex-wrap: wrap;
-  gap: 12px 16px;
 }
 
 .low-stock-banner {
@@ -524,65 +519,32 @@ input[type="date"]#cases-to-input {
 }
 .low-stock-banner strong { color: var(--danger); }
 
-.calendar-week-label {
-  font-weight: 700;
-  font-size: 13.5px;
-  flex: 1;
+.clock-card {
   text-align: center;
+  padding: 40px 28px;
 }
 
-.calendar-week {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(130px, 1fr));
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 6px;
-}
-
-.calendar-day {
-  background: var(--panel-alt);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px;
-  min-height: 130px;
-}
-
-.calendar-day.is-today {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
-}
-
-.calendar-day-header {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-}
-
-.calendar-day.is-today .calendar-day-header { color: var(--accent); }
-
-.calendar-shift-chip {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 11.5px;
+.clock-status {
+  font-size: 20px;
+  font-weight: 800;
   margin-bottom: 6px;
-  cursor: pointer;
-  transition: border-color 0.15s ease;
 }
-.calendar-shift-chip:hover { border-color: var(--accent); }
+.clock-status.is-in { color: var(--ok); }
+.clock-status.is-out { color: var(--text-muted); }
 
-.calendar-shift-time {
-  font-weight: 700;
-  display: block;
-}
-
-.calendar-day-empty {
-  font-size: 11px;
+.clock-since {
   color: var(--text-muted);
+  font-size: 13px;
+  min-height: 18px;
+  margin-bottom: 22px;
+}
+
+.clock-btn {
+  width: 100%;
+  max-width: 320px;
+  padding: 18px 24px;
+  font-size: 16px;
+  border-radius: 12px;
 }
 
 .active-check-label {
