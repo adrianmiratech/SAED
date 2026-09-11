@@ -1022,34 +1022,42 @@
         </div>
       </div>
 
-      <form id="course-form">
-        <label for="course-name">Nombre</label>
-        <input type="text" id="course-name" required placeholder="Ej: Primeros auxilios básicos" />
+      <div class="subtab-switch">
+        <button class="subtab-btn course-modal-subtab-btn active" data-course-subtab="info">ℹ️ Información</button>
+        <button class="subtab-btn course-modal-subtab-btn" data-course-subtab="materiales" id="course-subtab-materiales-btn" style="display:none">📄 Materiales</button>
+        <button class="subtab-btn course-modal-subtab-btn" data-course-subtab="clases" id="course-subtab-clases-btn" style="display:none">🗓️ Clases</button>
+        <button class="subtab-btn course-modal-subtab-btn" data-course-subtab="examenes" id="course-subtab-examenes-btn" style="display:none">📝 Exámenes</button>
+      </div>
 
-        <div id="course-department-field">
-          <label for="course-department">Departamento <span class="hint">(opcional)</span></label>
-          <select id="course-department">
-            <option value="">Compartido (SAMS y SAFD)</option>
-            <option value="sams">Solo SAMS</option>
-            <option value="safd">Solo SAFD</option>
-          </select>
-        </div>
+      <div id="course-subtab-info">
+        <form id="course-form">
+          <label for="course-name">Nombre</label>
+          <input type="text" id="course-name" required placeholder="Ej: Primeros auxilios básicos" />
 
-        <label for="course-description">Descripción <span class="hint">(opcional)</span></label>
-        <textarea id="course-description"></textarea>
+          <div id="course-department-field">
+            <label for="course-department">Departamento <span class="hint">(opcional)</span></label>
+            <select id="course-department">
+              <option value="">Compartido (SAMS y SAFD)</option>
+              <option value="sams">Solo SAMS</option>
+              <option value="safd">Solo SAFD</option>
+            </select>
+          </div>
 
-        <label class="active-check-label" for="course-active" id="course-active-field" style="display:none">
-          <input type="checkbox" id="course-active" style="width:auto" /> Curso activo
-        </label>
+          <label for="course-description">Descripción <span class="hint">(opcional)</span></label>
+          <textarea id="course-description"></textarea>
 
-        <div class="submit-row">
-          <button type="submit" class="btn-primary" id="course-form-submit">Crear curso</button>
-        </div>
-        <div id="course-message" class="message"></div>
-      </form>
+          <label class="active-check-label" for="course-active" id="course-active-field" style="display:none">
+            <input type="checkbox" id="course-active" style="width:auto" /> Curso activo
+          </label>
 
-      <div id="course-materials-section" style="display:none">
-        <h3 class="modal-section-title">Materiales del curso</h3>
+          <div class="submit-row">
+            <button type="submit" class="btn-primary" id="course-form-submit">Crear curso</button>
+          </div>
+          <div id="course-message" class="message"></div>
+        </form>
+      </div>
+
+      <div id="course-subtab-materiales" style="display:none">
         <p class="subtitle" style="margin:0 0 10px;">Subí presentaciones, PDFs u otros documentos para que los estudiantes los vean desde su portal. Máximo 3MB por archivo.</p>
         <div class="row">
           <div>
@@ -1064,8 +1072,7 @@
         <div id="materials-list" class="staff-list"></div>
       </div>
 
-      <div id="course-classes-section" style="display:none">
-        <h3 class="modal-section-title">Clases programadas</h3>
+      <div id="course-subtab-clases" style="display:none">
         <div class="row">
           <div>
             <label for="class-title">Título</label>
@@ -1085,6 +1092,64 @@
         </div>
         <div id="class-message" class="message"></div>
         <div id="classes-list" class="staff-list"></div>
+      </div>
+
+      <div id="course-subtab-examenes" style="display:none">
+        <div id="exams-list-view">
+          <div class="toolbar">
+            <span style="flex:1"></span>
+            <button id="new-exam-btn" class="btn-primary btn-sm">+ Nuevo examen</button>
+          </div>
+          <div id="exams-list" class="staff-list"></div>
+          <div id="exams-empty" class="empty-state" style="display:none">
+            <div class="empty-icon">📝</div>
+            <p>Todavía no hay exámenes para este curso.</p>
+          </div>
+        </div>
+
+        <div id="exam-editor-view" style="display:none">
+          <h3 class="modal-section-title" style="margin-top:0; padding-top:0; border-top:none;">Datos del examen</h3>
+          <label for="exam-title">Título</label>
+          <input type="text" id="exam-title" placeholder="Ej: Examen final de teoría" />
+
+          <label for="exam-description">Descripción <span class="hint">(opcional)</span></label>
+          <textarea id="exam-description"></textarea>
+
+          <div class="row">
+            <div>
+              <label for="exam-passing-percent">Porcentaje para aprobar</label>
+              <input type="number" id="exam-passing-percent" min="0" max="100" value="60" />
+            </div>
+            <div>
+              <label class="active-check-label" for="exam-active" id="exam-active-field" style="display:none; margin-top:26px;">
+                <input type="checkbox" id="exam-active" style="width:auto" /> Examen activo (visible para estudiantes)
+              </label>
+            </div>
+          </div>
+
+          <h3 class="modal-section-title">Preguntas</h3>
+          <div id="exam-questions-list"></div>
+          <div class="submit-row" style="margin-top:12px;">
+            <button type="button" id="add-question-btn" class="btn btn-ghost btn-sm">+ Agregar pregunta</button>
+          </div>
+
+          <div class="submit-row">
+            <button type="button" id="exam-cancel-btn" class="btn btn-ghost">Cancelar</button>
+            <button type="button" id="exam-save-btn" class="btn-primary">Guardar examen</button>
+          </div>
+          <div id="exam-message" class="message"></div>
+        </div>
+
+        <div id="exam-submissions-view" style="display:none">
+          <div class="toolbar">
+            <button type="button" id="exam-submissions-back-btn" class="btn btn-ghost btn-sm">← Volver a exámenes</button>
+          </div>
+          <div id="exam-submissions-list" class="staff-list"></div>
+          <div id="exam-submissions-empty" class="empty-state" style="display:none">
+            <div class="empty-icon">🧾</div>
+            <p>Todavía nadie entregó este examen.</p>
+          </div>
+        </div>
       </div>
 
       <div class="modal-actions">

@@ -1605,8 +1605,9 @@ app.get('/api/academy-materials/:id/download', requireAnyLogin, async (req, res)
     if (!canAccessCourseMaterials(req, course ? course.department : null)) return res.status(403).json({ error: 'No autorizado' });
 
     const buffer = Buffer.from(material.data_base64, 'base64');
+    const download = req.query.download === '1';
     res.setHeader('Content-Type', material.mime_type);
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(material.file_name)}"`);
+    res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename="${encodeURIComponent(material.file_name)}"`);
     res.send(buffer);
   } catch (err) {
     console.error('Error descargando material', req.params.id, err);
@@ -1626,6 +1627,298 @@ app.delete('/api/academy-materials/:id', requireAuth, requireAcademyAccess, asyn
   } catch (err) {
     console.error('Error eliminando material', req.params.id, err);
     res.status(500).json({ error: 'No se pudo eliminar el material' });
+  }
+});
+
+// ---- Exámenes de un curso (opción múltiple/verdadero-falso con
+// corrección automática, y respuesta abierta con corrección manual) ----
+
+const VALID_QUESTION_TYPES = ['multiple_choice', 'true_false', 'open'];
+
+function validateExamQuestions(questions) {
+  if (!Array.isArray(questions) || questions.length === 0) return 'El examen necesita al menos una pregunta';
+  for (const q of questions) {
+    if (!q || typeof q.prompt !== 'string' || !q.prompt.trim()) return 'Cada pregunta necesita un enunciado';
+    if (!VALID_QUESTION_TYPES.includes(q.type)) return `Tipo de pregunta inválido: ${q.type}`;
+    if (q.type === 'multiple_choice') {
+      const opts = (q.options || []).map((o) => String(o).trim()).filter(Boolean);
+      if (opts.length < 2) return `La pregunta "${q.prompt}" necesita al menos dos opciones`;
+      if (q.correctOption === undefined || q.correctOption === null || !(q.correctOption >= 0 && q.correctOption < opts.length)) {
+        return `Marcá cuál es la opción correcta en "${q.prompt}"`;
+      }
+    }
+    if (q.type === 'true_false' && (q.correctOption !== 0 && q.correctOption !== 1)) {
+      return `Marcá si "${q.prompt}" es verdadero o falso`;
+    }
+  }
+  return null;
+}
+
+function normalizeExamQuestions(questions) {
+  return questions.map((q, i) => {
+    const base = {
+      position: i,
+      type: q.type,
+      prompt: String(q.prompt).trim(),
+      points: Number(q.points) > 0 ? Number(q.points) : 1,
+    };
+    if (q.type === 'multiple_choice') {
+      return { ...base, options: q.options.map((o) => String(o).trim()).filter(Boolean), correctOption: q.correctOption };
+    }
+    if (q.type === 'true_false') {
+      return { ...base, options: ['Verdadero', 'Falso'], correctOption: q.correctOption };
+    }
+    return { ...base, options: null, correctOption: null };
+  });
+}
+
+async function insertExamQuestions(examId, questions) {
+  for (const q of questions) {
+    await db.prepare(`
+      INSERT INTO academy_exam_questions (exam_id, position, type, prompt, options_json, correct_option, points)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(examId, q.position, q.type, q.prompt, q.options ? JSON.stringify(q.options) : null, q.correctOption ?? null, q.points);
+  }
+}
+
+function parseExamQuestionRow(q) {
+  return { ...q, options: q.options_json ? JSON.parse(q.options_json) : null };
+}
+
+app.get('/api/academy-courses/:id/exams', requireAuth, requireAcademyAccess, async (req, res) => {
+  try {
+    const course = await getCourseWithAccess(req, res, req.params.id);
+    if (!course) return;
+
+    const exams = await db.prepare('SELECT * FROM academy_exams WHERE course_id = ? ORDER BY created_at DESC').all(req.params.id);
+    for (const exam of exams) {
+      const counts = await db.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM academy_exam_questions WHERE exam_id = ?) AS question_count,
+          (SELECT COUNT(*) FROM academy_exam_submissions WHERE exam_id = ?) AS submission_count,
+          (SELECT COUNT(*) FROM academy_exam_submissions WHERE exam_id = ? AND status = 'pendiente') AS pending_count
+      `).get(exam.id, exam.id, exam.id);
+      Object.assign(exam, counts);
+    }
+    res.json(exams);
+  } catch (err) {
+    console.error('Error listando exámenes', req.params.id, err);
+    res.status(500).json({ error: 'No se pudieron cargar los exámenes' });
+  }
+});
+
+app.get('/api/academy-exams/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  try {
+    const exam = await db.prepare('SELECT * FROM academy_exams WHERE id = ?').get(req.params.id);
+    if (!exam) return res.status(404).json({ error: 'Examen no encontrado' });
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(exam.course_id);
+    if (course && !courseDepartmentAllowed(req, res, course.department)) return;
+
+    const questions = await db.prepare('SELECT * FROM academy_exam_questions WHERE exam_id = ? ORDER BY position ASC').all(exam.id);
+    res.json({ ...exam, questions: questions.map(parseExamQuestionRow) });
+  } catch (err) {
+    console.error('Error obteniendo examen', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo cargar el examen' });
+  }
+});
+
+app.post('/api/academy-courses/:id/exams', requireAuth, requireAcademyAccess, async (req, res) => {
+  try {
+    const course = await getCourseWithAccess(req, res, req.params.id);
+    if (!course) return;
+
+    const { title, description, passingPercent, questions } = req.body || {};
+    if (!title || !title.trim()) return res.status(400).json({ error: 'El título es requerido' });
+    const questionsError = validateExamQuestions(questions);
+    if (questionsError) return res.status(400).json({ error: questionsError });
+
+    const info = await db.prepare(`
+      INSERT INTO academy_exams (course_id, title, description, passing_percent, created_by)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(course.id, title.trim(), (description || '').trim() || null, Number(passingPercent) || 60, req.session.username);
+
+    await insertExamQuestions(info.lastInsertRowid, normalizeExamQuestions(questions));
+
+    res.status(201).json({ id: info.lastInsertRowid });
+  } catch (err) {
+    console.error('Error creando examen', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo crear el examen' });
+  }
+});
+
+app.patch('/api/academy-exams/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  try {
+    const exam = await db.prepare('SELECT * FROM academy_exams WHERE id = ?').get(req.params.id);
+    if (!exam) return res.status(404).json({ error: 'Examen no encontrado' });
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(exam.course_id);
+    if (course && !courseDepartmentAllowed(req, res, course.department)) return;
+
+    const { title, description, passingPercent, active, questions } = req.body || {};
+    if (questions !== undefined) {
+      const questionsError = validateExamQuestions(questions);
+      if (questionsError) return res.status(400).json({ error: questionsError });
+      await db.prepare('DELETE FROM academy_exam_questions WHERE exam_id = ?').run(exam.id);
+      await insertExamQuestions(exam.id, normalizeExamQuestions(questions));
+    }
+
+    await db.prepare(`
+      UPDATE academy_exams SET title = ?, description = ?, passing_percent = ?, active = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      title !== undefined ? title.trim() : exam.title,
+      description !== undefined ? ((description || '').trim() || null) : exam.description,
+      passingPercent !== undefined ? (Number(passingPercent) || 60) : exam.passing_percent,
+      active !== undefined ? (active ? 1 : 0) : exam.active,
+      req.params.id,
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error actualizando examen', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo actualizar el examen' });
+  }
+});
+
+app.delete('/api/academy-exams/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  try {
+    const exam = await db.prepare('SELECT * FROM academy_exams WHERE id = ?').get(req.params.id);
+    if (!exam) return res.status(404).json({ error: 'Examen no encontrado' });
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(exam.course_id);
+    if (course && !courseDepartmentAllowed(req, res, course.department)) return;
+
+    const submissionIds = (await db.prepare('SELECT id FROM academy_exam_submissions WHERE exam_id = ?').all(exam.id)).map((s) => s.id);
+    for (const subId of submissionIds) {
+      await db.prepare('DELETE FROM academy_exam_answers WHERE submission_id = ?').run(subId);
+    }
+    await db.prepare('UPDATE academy_evaluations SET exam_submission_id = NULL WHERE exam_submission_id IN (SELECT id FROM academy_exam_submissions WHERE exam_id = ?)').run(exam.id);
+    await db.prepare('DELETE FROM academy_exam_submissions WHERE exam_id = ?').run(exam.id);
+    await db.prepare('DELETE FROM academy_exam_questions WHERE exam_id = ?').run(exam.id);
+    await db.prepare('DELETE FROM academy_exams WHERE id = ?').run(exam.id);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error eliminando examen', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo eliminar el examen' });
+  }
+});
+
+// Recalcula el puntaje de una entrega a partir de sus respuestas, y si ya
+// están todas corregidas (las de opción múltiple/verdadero-falso se
+// corrigen solas al entregar, las abiertas las corrige un instructor a
+// mano) la cierra y crea/actualiza automáticamente el registro en
+// Evaluaciones del estudiante — así el examen no queda separado del
+// resto del historial de formación.
+async function finalizeSubmission(submissionId, graderUsername) {
+  const submission = await db.prepare('SELECT * FROM academy_exam_submissions WHERE id = ?').get(submissionId);
+  const exam = await db.prepare('SELECT * FROM academy_exams WHERE id = ?').get(submission.exam_id);
+  const answers = await db.prepare(`
+    SELECT a.*, q.points AS question_points
+    FROM academy_exam_answers a
+    JOIN academy_exam_questions q ON q.id = a.question_id
+    WHERE a.submission_id = ?
+  `).all(submissionId);
+
+  const maxScore = answers.reduce((sum, a) => sum + a.question_points, 0);
+  const stillPending = answers.some((a) => a.points_awarded === null || a.points_awarded === undefined);
+  const score = answers.reduce((sum, a) => sum + (a.points_awarded || 0), 0);
+
+  if (stillPending) {
+    await db.prepare('UPDATE academy_exam_submissions SET status = ?, score = ?, max_score = ? WHERE id = ?')
+      .run('pendiente', score, maxScore, submissionId);
+    return;
+  }
+
+  const passed = maxScore > 0 && (score / maxScore) * 100 >= exam.passing_percent ? 1 : 0;
+  await db.prepare(`
+    UPDATE academy_exam_submissions
+    SET status = 'corregido', score = ?, max_score = ?, passed = ?, graded_by = ?, graded_at = datetime('now')
+    WHERE id = ?
+  `).run(score, maxScore, passed, graderUsername || submission.graded_by, submissionId);
+
+  const existingEval = await db.prepare('SELECT id FROM academy_evaluations WHERE exam_submission_id = ?').get(submissionId);
+  if (existingEval) {
+    await db.prepare('UPDATE academy_evaluations SET score = ?, max_score = ?, passed = ?, evaluator_name = ? WHERE id = ?')
+      .run(score, maxScore, passed, graderUsername || 'Automático', existingEval.id);
+  } else {
+    await db.prepare(`
+      INSERT INTO academy_evaluations (cadet_id, course_id, title, score, max_score, passed, evaluator_name, exam_submission_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(submission.cadet_id, exam.course_id, exam.title, score, maxScore, passed, graderUsername || 'Automático', submissionId);
+  }
+}
+
+app.get('/api/academy-exams/:id/submissions', requireAuth, requireAcademyAccess, async (req, res) => {
+  try {
+    const exam = await db.prepare('SELECT * FROM academy_exams WHERE id = ?').get(req.params.id);
+    if (!exam) return res.status(404).json({ error: 'Examen no encontrado' });
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(exam.course_id);
+    if (course && !courseDepartmentAllowed(req, res, course.department)) return;
+
+    const submissions = await db.prepare(`
+      SELECT s.*, c.full_name AS cadet_name
+      FROM academy_exam_submissions s
+      JOIN cadets c ON c.id = s.cadet_id
+      WHERE s.exam_id = ?
+      ORDER BY s.submitted_at DESC
+    `).all(exam.id);
+
+    for (const s of submissions) {
+      const answers = await db.prepare(`
+        SELECT a.*, q.prompt, q.type, q.options_json, q.correct_option, q.points AS question_points
+        FROM academy_exam_answers a
+        JOIN academy_exam_questions q ON q.id = a.question_id
+        WHERE a.submission_id = ?
+        ORDER BY q.position ASC
+      `).all(s.id);
+      s.answers = answers.map((a) => ({ ...a, options: a.options_json ? JSON.parse(a.options_json) : null }));
+    }
+
+    res.json(submissions);
+  } catch (err) {
+    console.error('Error listando entregas', req.params.id, err);
+    res.status(500).json({ error: 'No se pudieron cargar las entregas' });
+  }
+});
+
+app.patch('/api/academy-exam-submissions/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  try {
+    const submission = await db.prepare('SELECT * FROM academy_exam_submissions WHERE id = ?').get(req.params.id);
+    if (!submission) return res.status(404).json({ error: 'No encontrada' });
+    const exam = await db.prepare('SELECT * FROM academy_exams WHERE id = ?').get(submission.exam_id);
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(exam.course_id);
+    if (course && !courseDepartmentAllowed(req, res, course.department)) return;
+
+    const { grades } = req.body || {};
+    if (Array.isArray(grades)) {
+      for (const g of grades) {
+        await db.prepare('UPDATE academy_exam_answers SET points_awarded = ? WHERE id = ? AND submission_id = ?')
+          .run(Number(g.pointsAwarded) || 0, g.answerId, submission.id);
+      }
+    }
+
+    await finalizeSubmission(submission.id, req.session.username);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error corrigiendo entrega', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo guardar la corrección' });
+  }
+});
+
+app.delete('/api/academy-exam-submissions/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  try {
+    const submission = await db.prepare('SELECT * FROM academy_exam_submissions WHERE id = ?').get(req.params.id);
+    if (!submission) return res.status(404).json({ error: 'No encontrada' });
+    const exam = await db.prepare('SELECT * FROM academy_exams WHERE id = ?').get(submission.exam_id);
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(exam.course_id);
+    if (course && !courseDepartmentAllowed(req, res, course.department)) return;
+
+    await db.prepare('DELETE FROM academy_evaluations WHERE exam_submission_id = ?').run(submission.id);
+    await db.prepare('DELETE FROM academy_exam_answers WHERE submission_id = ?').run(submission.id);
+    await db.prepare('DELETE FROM academy_exam_submissions WHERE id = ?').run(submission.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error eliminando entrega', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo eliminar la entrega' });
   }
 });
 
@@ -2110,6 +2403,121 @@ app.get('/api/student/evaluations', requireCadetLoggedIn, async (req, res) => {
     ORDER BY ev.created_at DESC
   `).all(req.session.cadetId);
   res.json(rows);
+});
+
+// Exámenes activos de los cursos del propio departamento, con el estado
+// de la entrega del estudiante si ya lo rindió.
+app.get('/api/student/exams', requireCadetLoggedIn, async (req, res) => {
+  try {
+    const exams = await db.prepare(`
+      SELECT e.id, e.title, e.description, e.passing_percent, co.id AS course_id, co.name AS course_name
+      FROM academy_exams e
+      JOIN academy_courses co ON co.id = e.course_id
+      WHERE e.active = 1 AND (co.department IS NULL OR co.department = ?)
+      ORDER BY e.created_at DESC
+    `).all(req.session.department);
+
+    for (const exam of exams) {
+      const submission = await db.prepare(
+        'SELECT id, status, score, max_score, passed, submitted_at FROM academy_exam_submissions WHERE exam_id = ? AND cadet_id = ?',
+      ).get(exam.id, req.session.cadetId);
+      exam.submission = submission || null;
+      const count = await db.prepare('SELECT COUNT(*) AS c FROM academy_exam_questions WHERE exam_id = ?').get(exam.id);
+      exam.question_count = count.c;
+    }
+    res.json(exams);
+  } catch (err) {
+    console.error('Error listando exámenes del estudiante', err);
+    res.status(500).json({ error: 'No se pudieron cargar los exámenes' });
+  }
+});
+
+// Detalle para rendir el examen (sin filtrar la respuesta correcta ni el
+// puntaje de cada pregunta) o, si ya lo rindió, su propia entrega.
+app.get('/api/student/exams/:id', requireCadetLoggedIn, async (req, res) => {
+  try {
+    const exam = await db.prepare('SELECT * FROM academy_exams WHERE id = ? AND active = 1').get(req.params.id);
+    if (!exam) return res.status(404).json({ error: 'Examen no encontrado' });
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(exam.course_id);
+    if (!course || (course.department && course.department !== req.session.department)) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    const existing = await db.prepare('SELECT * FROM academy_exam_submissions WHERE exam_id = ? AND cadet_id = ?').get(exam.id, req.session.cadetId);
+    if (existing) {
+      const answers = await db.prepare(`
+        SELECT a.*, q.prompt, q.type, q.options_json
+        FROM academy_exam_answers a
+        JOIN academy_exam_questions q ON q.id = a.question_id
+        WHERE a.submission_id = ?
+        ORDER BY q.position ASC
+      `).all(existing.id);
+      return res.json({
+        id: exam.id, title: exam.title, description: exam.description, courseName: course.name,
+        submission: { ...existing, answers: answers.map((a) => ({ ...a, options: a.options_json ? JSON.parse(a.options_json) : null })) },
+      });
+    }
+
+    const questions = await db.prepare('SELECT id, position, type, prompt, options_json FROM academy_exam_questions WHERE exam_id = ? ORDER BY position ASC').all(exam.id);
+    res.json({
+      id: exam.id, title: exam.title, description: exam.description, courseName: course.name,
+      questions: questions.map((q) => ({ ...q, options: q.options_json ? JSON.parse(q.options_json) : null })),
+      submission: null,
+    });
+  } catch (err) {
+    console.error('Error obteniendo examen del estudiante', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo cargar el examen' });
+  }
+});
+
+app.post('/api/student/exams/:id/submit', requireCadetLoggedIn, async (req, res) => {
+  try {
+    const exam = await db.prepare('SELECT * FROM academy_exams WHERE id = ? AND active = 1').get(req.params.id);
+    if (!exam) return res.status(404).json({ error: 'Examen no encontrado' });
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(exam.course_id);
+    if (!course || (course.department && course.department !== req.session.department)) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    const already = await db.prepare('SELECT id FROM academy_exam_submissions WHERE exam_id = ? AND cadet_id = ?').get(exam.id, req.session.cadetId);
+    if (already) return res.status(409).json({ error: 'Ya entregaste este examen' });
+
+    const questions = await db.prepare('SELECT * FROM academy_exam_questions WHERE exam_id = ?').all(exam.id);
+    const { answers } = req.body || {};
+    if (!Array.isArray(answers)) return res.status(400).json({ error: 'Faltan respuestas' });
+    const answersByQuestion = new Map(answers.map((a) => [Number(a.questionId), a]));
+
+    const info = await db.prepare(`
+      INSERT INTO academy_exam_submissions (exam_id, cadet_id, status)
+      VALUES (?, ?, 'pendiente')
+    `).run(exam.id, req.session.cadetId);
+    const submissionId = info.lastInsertRowid;
+
+    for (const q of questions) {
+      const given = answersByQuestion.get(q.id) || {};
+      let pointsAwarded = null;
+      let selectedOption = null;
+      let answerText = null;
+
+      if (q.type === 'open') {
+        answerText = (given.answerText || '').trim() || null;
+      } else {
+        selectedOption = given.selectedOption !== undefined && given.selectedOption !== null ? Number(given.selectedOption) : null;
+        pointsAwarded = selectedOption !== null && selectedOption === q.correct_option ? q.points : 0;
+      }
+
+      await db.prepare(`
+        INSERT INTO academy_exam_answers (submission_id, question_id, answer_text, selected_option, points_awarded)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(submissionId, q.id, answerText, selectedOption, pointsAwarded);
+    }
+
+    await finalizeSubmission(submissionId, null);
+    res.status(201).json({ id: submissionId });
+  } catch (err) {
+    console.error('Error entregando examen', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo entregar el examen' });
+  }
 });
 
 // Manejo del error de multer (archivo demasiado grande) para que llegue

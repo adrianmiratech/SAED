@@ -270,6 +270,52 @@ async function setup() {
       uploaded_by TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS academy_exams (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      course_id INTEGER NOT NULL REFERENCES academy_courses(id),
+      title TEXT NOT NULL,
+      description TEXT,
+      passing_percent REAL NOT NULL DEFAULT 60,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS academy_exam_questions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      exam_id INTEGER NOT NULL REFERENCES academy_exams(id),
+      position INTEGER NOT NULL DEFAULT 0,
+      type TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      options_json TEXT,
+      correct_option INTEGER,
+      points REAL NOT NULL DEFAULT 1
+    );
+
+    CREATE TABLE IF NOT EXISTS academy_exam_submissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      exam_id INTEGER NOT NULL REFERENCES academy_exams(id),
+      cadet_id INTEGER NOT NULL REFERENCES cadets(id),
+      status TEXT NOT NULL DEFAULT 'pendiente',
+      score REAL,
+      max_score REAL,
+      passed INTEGER,
+      submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      graded_by TEXT,
+      graded_at TEXT,
+      UNIQUE(exam_id, cadet_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS academy_exam_answers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      submission_id INTEGER NOT NULL REFERENCES academy_exam_submissions(id),
+      question_id INTEGER NOT NULL REFERENCES academy_exam_questions(id),
+      answer_text TEXT,
+      selected_option INTEGER,
+      points_awarded REAL
+    );
   `);
 
   // employees y admins ya existían con datos reales antes de sumar estas
@@ -287,6 +333,10 @@ async function setup() {
   // Índice único parcial-friendly: SQLite trata cada NULL como distinto en
   // un UNIQUE INDEX, así que varios empleados sin usuario de fichaje conviven bien.
   await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_username ON employees(username)');
+
+  // Vincula una evaluación con el examen que la generó automáticamente
+  // (para no duplicarla si se vuelve a corregir la misma entrega).
+  await ensureColumn('academy_evaluations', 'exam_submission_id INTEGER');
 
   // Los estudiantes (cadetes) también pueden tener su propia cuenta para
   // entrar a un portal simplificado (ver materiales de sus cursos y sus

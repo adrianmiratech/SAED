@@ -2524,10 +2524,39 @@ const courseDepartmentField = document.getElementById('course-department-field')
 const courseFormSubmit = document.getElementById('course-form-submit');
 const courseDeleteBtn = document.getElementById('course-delete-btn');
 const courseActiveField = document.getElementById('course-active-field');
-const courseClassesSection = document.getElementById('course-classes-section');
 const classesListEl = document.getElementById('classes-list');
-const courseMaterialsSection = document.getElementById('course-materials-section');
 const materialsListEl = document.getElementById('materials-list');
+const examsListEl = document.getElementById('exams-list');
+const examsEmptyEl = document.getElementById('exams-empty');
+const examsListView = document.getElementById('exams-list-view');
+const examEditorView = document.getElementById('exam-editor-view');
+const examSubmissionsView = document.getElementById('exam-submissions-view');
+const examQuestionsListEl = document.getElementById('exam-questions-list');
+const examActiveField = document.getElementById('exam-active-field');
+const examSubmissionsListEl = document.getElementById('exam-submissions-list');
+const examSubmissionsEmptyEl = document.getElementById('exam-submissions-empty');
+let exams = [];
+let currentExamQuestions = [];
+let currentEditingExamId = null;
+let currentViewingExamId = null;
+
+// ---- Sub-pestañas dentro del modal de curso (Información / Materiales /
+// Clases / Exámenes) — antes todo vivía apilado en una sola pantalla larga. ----
+
+function switchCourseSubtab(tab) {
+  document.querySelectorAll('.course-modal-subtab-btn').forEach((b) => b.classList.toggle('active', b.dataset.courseSubtab === tab));
+  ['info', 'materiales', 'clases', 'examenes'].forEach((t) => {
+    document.getElementById(`course-subtab-${t}`).style.display = t === tab ? 'block' : 'none';
+  });
+  if (tab === 'examenes' && currentCourseId) {
+    showExamsListView();
+    loadExams(currentCourseId);
+  }
+}
+
+document.querySelectorAll('.course-modal-subtab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => switchCourseSubtab(btn.dataset.courseSubtab));
+});
 
 document.querySelectorAll('.academia-subtab-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
@@ -3054,8 +3083,10 @@ function openNewCourseModal() {
   courseFormSubmit.textContent = 'Crear curso';
   courseDeleteBtn.style.display = 'none';
   courseActiveField.style.display = 'none';
-  courseClassesSection.style.display = 'none';
-  courseMaterialsSection.style.display = 'none';
+  document.getElementById('course-subtab-materiales-btn').style.display = 'none';
+  document.getElementById('course-subtab-clases-btn').style.display = 'none';
+  document.getElementById('course-subtab-examenes-btn').style.display = 'none';
+  switchCourseSubtab('info');
   courseDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
 
   courseModalBackdrop.classList.add('open');
@@ -3073,8 +3104,10 @@ async function openCourseModal(id) {
   courseDeleteBtn.style.display = 'inline-flex';
   courseActiveField.style.display = 'flex';
   courseDepartmentField.style.display = 'none';
-  courseClassesSection.style.display = 'block';
-  courseMaterialsSection.style.display = 'block';
+  document.getElementById('course-subtab-materiales-btn').style.display = '';
+  document.getElementById('course-subtab-clases-btn').style.display = '';
+  document.getElementById('course-subtab-examenes-btn').style.display = '';
+  switchCourseSubtab('info');
 
   document.getElementById('course-name').value = c.name;
   document.getElementById('course-description').value = c.description || '';
@@ -3259,7 +3292,8 @@ function renderMaterials(rows) {
         <span class="staff-username">📄 ${escapeHtml(m.file_name)}</span>
         <span class="muted-link">${formatBytes(m.file_size)} · ${formatDate(m.created_at)}</span>
       </div>
-      <a class="btn btn-ghost btn-sm" href="/api/academy-materials/${m.id}/download">Descargar</a>
+      <a class="btn btn-primary btn-sm" href="/api/academy-materials/${m.id}/download" target="_blank" rel="noopener">Ver</a>
+      <a class="btn btn-ghost btn-sm" href="/api/academy-materials/${m.id}/download?download=1">Descargar</a>
       <button class="btn btn-danger btn-sm" data-delete-material="${m.id}">Eliminar</button>
     </div>
   `).join('');
@@ -3328,6 +3362,361 @@ document.getElementById('material-upload-btn').addEventListener('click', async (
     uploadBtn.textContent = 'Subir material';
   }
 });
+
+// ---- Exámenes de un curso ----
+
+function showExamsListView() {
+  examsListView.style.display = 'block';
+  examEditorView.style.display = 'none';
+  examSubmissionsView.style.display = 'none';
+}
+function showExamEditorView() {
+  examsListView.style.display = 'none';
+  examEditorView.style.display = 'block';
+  examSubmissionsView.style.display = 'none';
+}
+function showExamSubmissionsView() {
+  examsListView.style.display = 'none';
+  examEditorView.style.display = 'none';
+  examSubmissionsView.style.display = 'block';
+}
+
+async function loadExams(courseId) {
+  const res = await fetch(`/api/academy-courses/${courseId}/exams`);
+  if (!res.ok) return;
+  exams = await res.json();
+  renderExamsList();
+}
+
+function renderExamsList() {
+  if (exams.length === 0) {
+    examsListEl.innerHTML = '';
+    examsEmptyEl.style.display = 'block';
+    return;
+  }
+  examsEmptyEl.style.display = 'none';
+  examsListEl.innerHTML = exams.map((e) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(e.title)}</span>
+        <span class="status-pill ${e.active ? 'status-aprobado' : 'status-baja'}">${e.active ? 'Activo' : 'Inactivo'}</span>
+        <span class="muted-link">${e.question_count} pregunta${e.question_count === 1 ? '' : 's'} · ${e.submission_count} entrega${e.submission_count === 1 ? '' : 's'}${e.pending_count > 0 ? ` · ${e.pending_count} por corregir` : ''}</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-view-exam-submissions="${e.id}">Ver entregas</button>
+      <button class="btn btn-ghost btn-sm" data-edit-exam="${e.id}">Editar</button>
+      <button class="btn btn-danger btn-sm" data-delete-exam="${e.id}">Eliminar</button>
+    </div>
+  `).join('');
+
+  examsListEl.querySelectorAll('[data-view-exam-submissions]').forEach((btn) => {
+    btn.addEventListener('click', () => openExamSubmissions(Number(btn.dataset.viewExamSubmissions)));
+  });
+  examsListEl.querySelectorAll('[data-edit-exam]').forEach((btn) => {
+    btn.addEventListener('click', () => openExamEditor(Number(btn.dataset.editExam)));
+  });
+  examsListEl.querySelectorAll('[data-delete-exam]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este examen y todas sus entregas?')) return;
+      await fetch(`/api/academy-exams/${btn.dataset.deleteExam}`, { method: 'DELETE' });
+      await loadExams(currentCourseId);
+      showToast('Examen eliminado.', 'danger');
+    });
+  });
+}
+
+function resetExamForm() {
+  document.getElementById('exam-title').value = '';
+  document.getElementById('exam-description').value = '';
+  document.getElementById('exam-passing-percent').value = '60';
+  document.getElementById('exam-active').checked = true;
+  document.getElementById('exam-message').className = 'message';
+  document.getElementById('exam-message').textContent = '';
+  currentExamQuestions = [];
+}
+
+function openNewExamEditor() {
+  currentEditingExamId = null;
+  resetExamForm();
+  examActiveField.style.display = 'none';
+  document.getElementById('exam-save-btn').textContent = 'Guardar examen';
+  renderExamQuestionRows();
+  showExamEditorView();
+}
+
+async function openExamEditor(examId) {
+  currentEditingExamId = examId;
+  resetExamForm();
+  const res = await fetch(`/api/academy-exams/${examId}`);
+  const exam = await res.json();
+
+  document.getElementById('exam-title').value = exam.title;
+  document.getElementById('exam-description').value = exam.description || '';
+  document.getElementById('exam-passing-percent').value = exam.passing_percent;
+  document.getElementById('exam-active').checked = !!exam.active;
+  examActiveField.style.display = 'flex';
+  document.getElementById('exam-save-btn').textContent = 'Guardar cambios';
+
+  currentExamQuestions = exam.questions.map((q) => ({
+    type: q.type, prompt: q.prompt, points: q.points,
+    options: q.options ? [...q.options] : (q.type === 'true_false' ? ['Verdadero', 'Falso'] : q.type === 'multiple_choice' ? ['', ''] : null),
+    correctOption: q.correct_option,
+  }));
+  renderExamQuestionRows();
+  showExamEditorView();
+}
+
+function questionOptionRowHtml(opt, oi, correctOption, type, qIndex) {
+  const checked = Number(correctOption) === oi ? 'checked' : '';
+  if (type === 'true_false') {
+    return `
+      <div class="question-option-row">
+        <input type="radio" name="correct-${qIndex}" class="question-option-correct" data-option-index="${oi}" ${checked} />
+        <span>${oi === 0 ? 'Verdadero' : 'Falso'}</span>
+      </div>
+    `;
+  }
+  return `
+    <div class="question-option-row">
+      <input type="radio" name="correct-${qIndex}" class="question-option-correct" data-option-index="${oi}" ${checked} />
+      <input type="text" class="question-option-text" value="${escapeHtml(opt)}" placeholder="Opción ${oi + 1}" />
+      <button type="button" class="btn btn-danger btn-sm remove-option-btn">×</button>
+    </div>
+  `;
+}
+
+function renderExamQuestionRows() {
+  if (currentExamQuestions.length === 0) {
+    examQuestionsListEl.innerHTML = '<div class="staff-empty">Todavía no agregaste ninguna pregunta.</div>';
+    return;
+  }
+  examQuestionsListEl.innerHTML = currentExamQuestions.map((q, i) => `
+    <div class="field-row" data-index="${i}">
+      <div class="row">
+        <div>
+          <label>Enunciado</label>
+          <input type="text" class="question-prompt-input" value="${escapeHtml(q.prompt)}" placeholder="Ej: ¿Cuál es la dosis correcta?" />
+        </div>
+        <div>
+          <label>Tipo</label>
+          <select class="question-type-input">
+            <option value="multiple_choice" ${q.type === 'multiple_choice' ? 'selected' : ''}>Opción múltiple</option>
+            <option value="true_false" ${q.type === 'true_false' ? 'selected' : ''}>Verdadero / Falso</option>
+            <option value="open" ${q.type === 'open' ? 'selected' : ''}>Respuesta abierta</option>
+          </select>
+        </div>
+      </div>
+      <div class="question-options-wrap" style="display:${q.type !== 'open' ? 'block' : 'none'}">
+        <label>Opciones <span class="hint">(marcá la correcta)</span></label>
+        <div class="question-options-list">
+          ${(q.options || []).map((opt, oi) => questionOptionRowHtml(opt, oi, q.correctOption, q.type, i)).join('')}
+        </div>
+        ${q.type === 'multiple_choice' ? '<button type="button" class="btn btn-ghost btn-sm add-option-btn">+ Agregar opción</button>' : ''}
+      </div>
+      <div class="field-row-footer">
+        <label class="active-check-label" style="margin:0;">Puntos <input type="number" class="question-points-input" value="${q.points}" min="0.5" step="0.5" style="width:70px; margin-left:6px;" /></label>
+        <button type="button" class="btn btn-danger btn-sm remove-question-btn">Eliminar pregunta</button>
+      </div>
+    </div>
+  `).join('');
+
+  examQuestionsListEl.querySelectorAll('.field-row').forEach((rowEl) => {
+    const idx = Number(rowEl.dataset.index);
+    rowEl.querySelector('.question-prompt-input').addEventListener('input', (e) => { currentExamQuestions[idx].prompt = e.target.value; });
+    rowEl.querySelector('.question-type-input').addEventListener('change', (e) => {
+      const newType = e.target.value;
+      const q = currentExamQuestions[idx];
+      q.type = newType;
+      if (newType === 'true_false') {
+        q.options = ['Verdadero', 'Falso'];
+        q.correctOption = 0;
+      } else if (newType === 'multiple_choice') {
+        q.options = Array.isArray(q.options) && q.options.length >= 2 ? q.options : ['', ''];
+        q.correctOption = null;
+      } else {
+        q.options = null;
+        q.correctOption = null;
+      }
+      renderExamQuestionRows();
+    });
+    rowEl.querySelectorAll('.question-option-correct').forEach((radio) => {
+      radio.addEventListener('change', (e) => { currentExamQuestions[idx].correctOption = Number(e.target.dataset.optionIndex); });
+    });
+    rowEl.querySelectorAll('.question-option-text').forEach((input, oi) => {
+      input.addEventListener('input', (e) => { currentExamQuestions[idx].options[oi] = e.target.value; });
+    });
+    const addOptionBtn = rowEl.querySelector('.add-option-btn');
+    if (addOptionBtn) {
+      addOptionBtn.addEventListener('click', () => {
+        currentExamQuestions[idx].options.push('');
+        renderExamQuestionRows();
+      });
+    }
+    rowEl.querySelectorAll('.remove-option-btn').forEach((btn, oi) => {
+      btn.addEventListener('click', () => {
+        const q = currentExamQuestions[idx];
+        q.options.splice(oi, 1);
+        if (q.correctOption !== null && q.correctOption >= q.options.length) q.correctOption = null;
+        renderExamQuestionRows();
+      });
+    });
+    rowEl.querySelector('.question-points-input').addEventListener('input', (e) => { currentExamQuestions[idx].points = Number(e.target.value) || 1; });
+    rowEl.querySelector('.remove-question-btn').addEventListener('click', () => {
+      currentExamQuestions.splice(idx, 1);
+      renderExamQuestionRows();
+    });
+  });
+}
+
+document.getElementById('add-question-btn').addEventListener('click', () => {
+  currentExamQuestions.push({ type: 'multiple_choice', prompt: '', options: ['', ''], correctOption: null, points: 1 });
+  renderExamQuestionRows();
+});
+
+document.getElementById('exam-save-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('exam-message');
+  msg.className = 'message';
+  msg.textContent = '';
+
+  const title = document.getElementById('exam-title').value.trim();
+  const description = document.getElementById('exam-description').value.trim();
+  const passingPercent = Number(document.getElementById('exam-passing-percent').value) || 60;
+
+  if (!title) {
+    msg.className = 'message error';
+    msg.textContent = 'Ponele un título al examen.';
+    return;
+  }
+  if (currentExamQuestions.length === 0) {
+    msg.className = 'message error';
+    msg.textContent = 'Agregá al menos una pregunta.';
+    return;
+  }
+
+  const body = {
+    title,
+    description,
+    passingPercent,
+    questions: currentExamQuestions.map((q) => ({
+      type: q.type,
+      prompt: q.prompt,
+      points: q.points,
+      options: q.type !== 'open' ? q.options : undefined,
+      correctOption: q.type !== 'open' ? q.correctOption : undefined,
+    })),
+  };
+  if (currentEditingExamId) body.active = document.getElementById('exam-active').checked;
+
+  const saveBtn = document.getElementById('exam-save-btn');
+  saveBtn.disabled = true;
+  try {
+    const url = currentEditingExamId ? `/api/academy-exams/${currentEditingExamId}` : `/api/academy-courses/${currentCourseId}/exams`;
+    const method = currentEditingExamId ? 'PATCH' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el examen');
+
+    showToast(currentEditingExamId ? 'Examen actualizado.' : 'Examen creado.');
+    await loadExams(currentCourseId);
+    showExamsListView();
+  } catch (err) {
+    msg.className = 'message error';
+    msg.textContent = err.message;
+  } finally {
+    saveBtn.disabled = false;
+  }
+});
+
+document.getElementById('exam-cancel-btn').addEventListener('click', showExamsListView);
+document.getElementById('new-exam-btn').addEventListener('click', openNewExamEditor);
+document.getElementById('exam-submissions-back-btn').addEventListener('click', showExamsListView);
+
+async function openExamSubmissions(examId) {
+  currentViewingExamId = examId;
+  examSubmissionsListEl.innerHTML = '<div class="staff-empty">Cargando…</div>';
+  showExamSubmissionsView();
+  const res = await fetch(`/api/academy-exams/${examId}/submissions`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  renderExamSubmissions(rows);
+}
+
+function examSubmissionStatusPill(s) {
+  if (s.status !== 'corregido') return '<span class="status-pill status-pendiente">Pendiente de corrección</span>';
+  return `<span class="status-pill ${s.passed ? 'status-aprobado' : 'status-rechazado'}">${s.passed ? 'Aprobado' : 'Reprobado'} · ${s.score}/${s.max_score}</span>`;
+}
+
+function renderExamSubmissions(rows) {
+  if (rows.length === 0) {
+    examSubmissionsListEl.innerHTML = '';
+    examSubmissionsEmptyEl.style.display = 'block';
+    return;
+  }
+  examSubmissionsEmptyEl.style.display = 'none';
+  examSubmissionsListEl.innerHTML = rows.map((s) => `
+    <div class="field-row" data-submission-id="${s.id}">
+      <div class="field-row-footer" style="margin-top:0;">
+        <span class="staff-username">${escapeHtml(s.cadet_name)}</span>
+        ${examSubmissionStatusPill(s)}
+        <span class="muted-link">${formatDate(s.submitted_at)}</span>
+      </div>
+      ${s.answers.map((a) => `
+        <div class="report-field-value">
+          <div class="k">${escapeHtml(a.prompt)}${a.type !== 'open' ? ` (${a.points_awarded === a.question_points ? '✓' : '✕'} ${a.question_points} pts)` : ` (${a.question_points} pts)`}</div>
+          <div class="v">${a.type === 'open' ? escapeHtml(a.answer_text || '—') : escapeHtml((a.options || [])[a.selected_option] ?? 'Sin responder')}</div>
+          ${a.type === 'open' ? `
+            <div class="row" style="margin-top:6px;">
+              <div>
+                <label>Puntos otorgados <span class="hint">(máx ${a.question_points})</span></label>
+                <input type="number" class="grade-points-input" data-answer-id="${a.id}" min="0" max="${a.question_points}" step="0.5" value="${a.points_awarded ?? ''}" />
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `).join('')}
+      ${s.status === 'pendiente' ? `<div class="submit-row" style="margin-top:10px;"><button class="btn btn-primary btn-sm" data-save-grades="${s.id}">Guardar corrección</button></div>` : ''}
+      <div class="submit-row" style="margin-top:6px;">
+        <button class="btn btn-danger btn-sm" data-delete-submission="${s.id}">Eliminar entrega</button>
+      </div>
+    </div>
+  `).join('');
+
+  examSubmissionsListEl.querySelectorAll('[data-save-grades]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('.field-row');
+      const grades = Array.from(row.querySelectorAll('.grade-points-input')).map((input) => ({
+        answerId: Number(input.dataset.answerId),
+        pointsAwarded: Number(input.value) || 0,
+      }));
+      const res = await fetch(`/api/academy-exam-submissions/${btn.dataset.saveGrades}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grades }),
+      });
+      if (res.ok) {
+        await openExamSubmissions(currentViewingExamId);
+        await loadExams(currentCourseId);
+        showToast('Corrección guardada.');
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'No se pudo guardar la corrección.', 'danger');
+      }
+    });
+  });
+
+  examSubmissionsListEl.querySelectorAll('[data-delete-submission]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta entrega? El estudiante va a poder rendir el examen de nuevo.')) return;
+      await fetch(`/api/academy-exam-submissions/${btn.dataset.deleteSubmission}`, { method: 'DELETE' });
+      await openExamSubmissions(currentViewingExamId);
+      await loadExams(currentCourseId);
+      showToast('Entrega eliminada.', 'danger');
+    });
+  });
+}
 
 checkSession().then(() => {
   // switchTab() ya cargó los datos de la pestaña inicial; acá solo hace

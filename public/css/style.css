@@ -688,6 +688,16 @@ input[type="date"]#attendance-to-input {
   margin: 10px 0 8px;
 }
 
+.question-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.question-option-row input[type="radio"] { width: auto; flex-shrink: 0; }
+.question-option-row input[type="text"] { flex: 1; margin: 0; }
+.question-option-row .remove-option-btn { flex-shrink: 0; padding: 6px 10px; }
+
 .report-field-value {
   margin-bottom: 10px;
 }
