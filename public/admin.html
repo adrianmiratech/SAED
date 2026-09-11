@@ -29,6 +29,7 @@
       <nav class="sidebar-nav" id="main-tabs">
         <span class="sidebar-section-label">Mi cuenta</span>
         <button class="sidebar-link tab-btn active" data-tab="fichaje"><span class="sidebar-link-icon">🕒</span> Mi Fichaje</button>
+        <button class="sidebar-link tab-btn" data-tab="informes"><span class="sidebar-link-icon">📝</span> Informes</button>
 
         <span class="sidebar-section-label" id="nav-section-reclutamiento" style="display:none">Reclutamiento</span>
         <button class="sidebar-link tab-btn" data-tab="postulaciones" id="nav-postulaciones-btn" style="display:none"><span class="sidebar-link-icon">📋</span> Postulaciones</button>
@@ -85,6 +86,30 @@
             <div id="my-history-empty" class="empty-state" style="display:none">
               <div class="empty-icon">🕒</div>
               <p>Todavía no fichaste ninguna entrada.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-informes" style="display:none">
+          <div class="card">
+            <div class="toolbar">
+              <h1 style="font-size:15px; margin:0;">Plantillas disponibles</h1>
+              <span style="flex:1"></span>
+              <button id="manage-templates-btn" class="btn btn-ghost btn-sm" style="display:none">Gestionar plantillas</button>
+            </div>
+            <div id="templates-list" class="staff-list"></div>
+            <div id="templates-empty" class="empty-state" style="display:none">
+              <div class="empty-icon">📝</div>
+              <p>Todavía no hay plantillas de informes para tu departamento.</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="modal-section-title" style="margin-top:0; padding-top:0; border-top:none;">Mis informes enviados</h3>
+            <div id="my-reports-list" class="staff-list"></div>
+            <div id="my-reports-empty" class="empty-state" style="display:none">
+              <div class="empty-icon">📄</div>
+              <p>Todavía no enviaste ningún informe.</p>
             </div>
           </div>
         </div>
@@ -402,8 +427,10 @@
         <label for="employee-rank">Rango</label>
         <select id="employee-rank"></select>
 
-        <label for="employee-role">Rol / división <span class="hint">(opcional)</span></label>
-        <select id="employee-role"><option value="">Sin rol asignado</option></select>
+        <div id="employee-roles-field">
+          <label>Divisiones <span class="hint">(opcional, se puede pertenecer a varias — el acceso al panel lo dan automáticamente)</span></label>
+          <div id="employee-roles-checklist" class="checklist"></div>
+        </div>
 
         <label class="active-check-label" for="employee-active" id="employee-active-field" style="display:none">
           <input type="checkbox" id="employee-active" style="width:auto" /> Empleado activo
@@ -432,24 +459,6 @@
           <button type="button" id="employee-fichaje-save-btn" class="btn-primary btn-sm">Guardar acceso</button>
         </div>
         <div id="employee-fichaje-message" class="message"></div>
-      </div>
-
-      <div id="employee-access-section" style="display:none">
-        <h3 class="modal-section-title">Nivel de acceso</h3>
-        <p class="subtitle">Todos pueden fichar con su cuenta. Esto define además qué ve en el panel de gestión.</p>
-        <label class="active-check-label" for="employee-is-staff">
-          <input type="checkbox" id="employee-is-staff" style="width:auto" /> Staff (entra al panel de gestión de su departamento)
-        </label>
-        <label class="active-check-label" for="employee-is-superadmin">
-          <input type="checkbox" id="employee-is-superadmin" style="width:auto" /> Superadmin (ve y gestiona ambos departamentos)
-        </label>
-        <label class="active-check-label" for="employee-hr-access">
-          <input type="checkbox" id="employee-hr-access" style="width:auto" /> Acceso a Fichajes (RRHH / Dirección)
-        </label>
-        <div class="submit-row">
-          <button type="button" id="employee-access-save-btn" class="btn-primary btn-sm">Guardar nivel de acceso</button>
-        </div>
-        <div id="employee-access-message" class="message"></div>
       </div>
 
       <div id="employee-payroll-section" style="display:none">
@@ -504,7 +513,7 @@
         </div>
       </div>
 
-      <h3 class="modal-section-title">Nuevo rol</h3>
+      <h3 class="modal-section-title">Nueva división</h3>
       <form id="role-form">
         <div class="row">
           <div>
@@ -520,13 +529,21 @@
             </select>
           </div>
         </div>
+
+        <label>Acceso que otorga automáticamente <span class="hint">(opcional)</span></label>
+        <div class="checklist">
+          <label><input type="checkbox" id="role-grants-staff" /> Staff (panel de su departamento)</label>
+          <label><input type="checkbox" id="role-grants-superadmin" /> Superadmin (ambos departamentos)</label>
+          <label><input type="checkbox" id="role-grants-hr" /> Ver Fichajes (RRHH / Dirección)</label>
+        </div>
+
         <div class="submit-row">
-          <button type="submit" class="btn-primary btn-sm">Crear rol</button>
+          <button type="submit" class="btn-primary btn-sm">Crear división</button>
         </div>
         <div id="role-message" class="message"></div>
       </form>
 
-      <h3 class="modal-section-title">Roles existentes</h3>
+      <h3 class="modal-section-title">Divisiones existentes</h3>
       <div id="roles-list" class="staff-list"></div>
 
       <div class="modal-actions">
@@ -567,18 +584,27 @@
       </div>
 
       <h3 class="modal-section-title">Revisión del staff</h3>
-      <label for="modal-notes">Notas internas</label>
-      <textarea id="modal-notes" placeholder="Notas del staff sobre esta postulación..."></textarea>
 
-      <label for="modal-rank">Rango a asignar (se usa al aprobar, para sumarlo al roster de Personal)</label>
+      <div class="review-decision">
+        <button class="btn btn-ok review-btn" data-action="aprobado">
+          <span class="review-btn-icon">✓</span> Aprobar
+        </button>
+        <button class="btn btn-danger review-btn" data-action="rechazado">
+          <span class="review-btn-icon">✕</span> Rechazar
+        </button>
+      </div>
+
+      <label for="modal-rank">Rango a asignar al aprobar</label>
       <select id="modal-rank"></select>
 
-      <div class="modal-actions">
-        <button class="btn btn-danger" data-action="rechazado">Rechazar</button>
-        <button class="btn btn-info" data-action="en_revision">En revisión</button>
-        <button class="btn btn-ghost" data-action="pendiente">Marcar pendiente</button>
-        <button class="btn btn-ok" data-action="aprobado">Aprobar</button>
+      <div class="review-secondary">
+        <button class="btn btn-info btn-sm" data-action="en_revision">En revisión</button>
+        <button class="btn btn-ghost btn-sm" data-action="pendiente">Marcar pendiente</button>
       </div>
+
+      <label for="modal-notes">Notas internas <span class="hint">(opcional)</span></label>
+      <textarea id="modal-notes" placeholder="Notas del staff sobre esta postulación..."></textarea>
+
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="modal-close">Cerrar</button>
         <button class="btn btn-danger btn-sm" id="modal-delete">Eliminar postulación</button>
@@ -752,6 +778,101 @@
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="case-modal-close">Cerrar</button>
         <button class="btn btn-danger btn-sm" id="case-delete-btn" style="display:none">Eliminar atención</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="templates-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2>Gestionar plantillas de informes</h2>
+          <p class="subtitle">Creá formularios para que el personal de tu departamento los complete.</p>
+        </div>
+      </div>
+
+      <div id="templates-manage-view">
+        <div class="toolbar">
+          <button id="new-template-btn" class="btn-primary btn-sm">+ Nueva plantilla</button>
+        </div>
+        <div id="templates-manage-items" class="staff-list"></div>
+      </div>
+
+      <div id="template-editor" style="display:none">
+        <h3 class="modal-section-title">Datos de la plantilla</h3>
+        <label for="template-name">Nombre</label>
+        <input type="text" id="template-name" required placeholder="Ej: Informe de patrullaje" />
+
+        <label for="template-description">Descripción <span class="hint">(opcional)</span></label>
+        <textarea id="template-description" placeholder="Para qué sirve este informe"></textarea>
+
+        <div id="template-department-field">
+          <label for="template-department">Departamento</label>
+          <select id="template-department">
+            <option value="sams">SAMS</option>
+            <option value="safd">SAFD</option>
+          </select>
+        </div>
+
+        <label class="active-check-label" for="template-active" id="template-active-field" style="display:none">
+          <input type="checkbox" id="template-active" style="width:auto" /> Plantilla activa (visible para el personal)
+        </label>
+
+        <h3 class="modal-section-title">Campos del formulario</h3>
+        <div id="template-fields-list"></div>
+        <div class="submit-row" style="margin-top:12px;">
+          <button type="button" id="add-field-btn" class="btn btn-ghost btn-sm">+ Agregar campo</button>
+        </div>
+
+        <div class="submit-row">
+          <button type="button" id="template-cancel-btn" class="btn btn-ghost">Cancelar</button>
+          <button type="button" id="template-save-btn" class="btn-primary">Guardar plantilla</button>
+        </div>
+        <div id="template-message" class="message"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="templates-modal-close">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="fill-report-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="fill-report-title"></h2>
+          <p class="subtitle" id="fill-report-sub"></p>
+        </div>
+      </div>
+      <form id="fill-report-form">
+        <div id="fill-report-fields"></div>
+        <div class="submit-row">
+          <button type="submit" class="btn-primary" id="fill-report-submit">Enviar informe</button>
+        </div>
+        <div id="fill-report-message" class="message"></div>
+      </form>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="fill-report-modal-close">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="submissions-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="submissions-modal-title">Respuestas</h2>
+          <p class="subtitle" id="submissions-modal-sub"></p>
+        </div>
+      </div>
+      <div id="submissions-list" class="staff-list"></div>
+      <div id="submissions-empty" class="empty-state" style="display:none">
+        <div class="empty-icon">📄</div>
+        <p>Todavía no hay informes enviados con esta plantilla.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="submissions-modal-close">Cerrar</button>
       </div>
     </div>
   </div>

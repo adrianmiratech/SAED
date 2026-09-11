@@ -32,11 +32,15 @@ function prepare(sql) {
   };
 }
 
+// Devuelve true si la columna se acaba de agregar recién ahora (para poder
+// aplicar un backfill de datos una sola vez, la primera vez que existe).
 async function ensureColumn(table, columnDef) {
   try {
     await client.execute(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+    return true;
   } catch (err) {
     if (!/duplicate column name/i.test(err.message)) throw err;
+    return false;
   }
 }
 
@@ -127,6 +131,12 @@ async function setup() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS employee_role_links (
+      employee_id INTEGER NOT NULL REFERENCES employees(id),
+      role_id INTEGER NOT NULL REFERENCES employee_roles(id),
+      PRIMARY KEY (employee_id, role_id)
+    );
+
     CREATE TABLE IF NOT EXISTS attendance (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       employee_id INTEGER NOT NULL REFERENCES employees(id),
@@ -173,6 +183,27 @@ async function setup() {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS report_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      department TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      fields_json TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS report_submissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_id INTEGER NOT NULL REFERENCES report_templates(id),
+      department TEXT NOT NULL,
+      employee_id INTEGER NOT NULL REFERENCES employees(id),
+      data_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // employees y admins ya existían con datos reales antes de sumar estas
@@ -181,22 +212,84 @@ async function setup() {
   // la columna ya está (SQLite no tiene "ADD COLUMN IF NOT EXISTS").
   await ensureColumn('employees', 'username TEXT');
   await ensureColumn('employees', 'password_hash TEXT');
-  await ensureColumn('employees', 'role_id INTEGER REFERENCES employee_roles(id)');
-  await ensureColumn('employees', 'is_staff INTEGER NOT NULL DEFAULT 0');
-  await ensureColumn('employees', 'is_superadmin INTEGER NOT NULL DEFAULT 0');
-  await ensureColumn('employees', 'hr_access INTEGER NOT NULL DEFAULT 0');
   await ensureColumn('admins', 'hr_access INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn('report_submissions', "status TEXT NOT NULL DEFAULT 'pendiente'");
+  await ensureColumn('report_submissions', 'review_notes TEXT');
+  await ensureColumn('report_submissions', 'reviewed_by TEXT');
+  await ensureColumn('report_submissions', 'reviewed_at TEXT');
   // Índice único parcial-friendly: SQLite trata cada NULL como distinto en
   // un UNIQUE INDEX, así que varios empleados sin usuario de fichaje conviven bien.
   await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_username ON employees(username)');
 
-  // Siembra los roles/divisiones del SAED si la tabla está vacía. Son
-  // compartidos por ambos departamentos (no van atados a SAMS o SAFD).
-  const roleCount = (await prepare('SELECT COUNT(*) AS c FROM employee_roles').get()).c;
-  if (roleCount === 0) {
-    const seedRoles = ['RTD (Recruitment and Training Division)', 'Recursos Humanos', 'Dirección', 'Estudiantes'];
-    for (const name of seedRoles) {
-      await prepare('INSERT INTO employee_roles (name, department) VALUES (?, NULL)').run(name);
+  // El acceso (staff / superadmin / RRHH-Fichajes) ya no son casilleros
+  // sueltos por empleado: los otorga la división a la que pertenece. Un
+  // empleado puede estar en varias divisiones a la vez y el acceso
+  // efectivo es la unión de lo que otorga cada una.
+  const addedGrantsColumns = await ensureColumn('employee_roles', 'grants_staff INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn('employee_roles', 'grants_superadmin INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn('employee_roles', 'grants_hr_access INTEGER NOT NULL DEFAULT 0');
+
+  // employees.role_id (una sola división) quedó reemplazado por la tabla
+  // employee_role_links (varias). Si la columna vieja todavía existe en
+  // esta base, se migra una sola vez; si no existe (bases nuevas), no hace
+  // nada y sigue de largo.
+  try {
+    await client.execute(`
+      INSERT OR IGNORE INTO employee_role_links (employee_id, role_id)
+      SELECT id, role_id FROM employees WHERE role_id IS NOT NULL
+    `);
+  } catch (err) {
+    if (!/no such column: role_id/i.test(err.message)) throw err;
+  }
+
+  // Limpieza única: si dos arranques en frío corrieron el sembrado de
+  // roles casi al mismo tiempo (cold starts concurrentes en serverless),
+  // el chequeo de "¿está vacía la tabla?" de abajo podía correr dos veces
+  // antes de que ninguno terminara de insertar, dejando el mismo rol
+  // duplicado. Acá se agrupan por nombre + departamento (tratando NULL
+  // como un valor más, no como "distinto de sí mismo") y se dejan solo el
+  // más viejo, reapuntando primero los vínculos que tenía el resto.
+  const allRoles = await prepare('SELECT * FROM employee_roles ORDER BY id ASC').all();
+  const seenRoleKeys = new Map();
+  for (const r of allRoles) {
+    const key = `${r.name}|${r.department || ''}`;
+    if (!seenRoleKeys.has(key)) {
+      seenRoleKeys.set(key, r.id);
+    } else {
+      const keepId = seenRoleKeys.get(key);
+      await prepare('UPDATE OR IGNORE employee_role_links SET role_id = ? WHERE role_id = ?').run(keepId, r.id);
+      await prepare('DELETE FROM employee_role_links WHERE role_id = ?').run(r.id);
+      await prepare('DELETE FROM employee_roles WHERE id = ?').run(r.id);
+    }
+  }
+
+  // Siembra los roles/divisiones del SAED (compartidos por ambos
+  // departamentos) si todavía no existen, comprobando cada uno por
+  // nombre en vez de "¿está vacía la tabla?" para que sea segura de
+  // repetir sin volver a duplicar nada. "Dirección" y "Recursos Humanos"
+  // ya vienen con el acceso correspondiente otorgado.
+  const seedRoles = [
+    ['RTD (Recruitment and Training Division)', 0, 0, 0],
+    ['Recursos Humanos', 1, 0, 1],
+    ['Dirección', 1, 1, 0],
+    ['Estudiantes', 0, 0, 0],
+  ];
+  for (const [name, grantsStaff, grantsSuperadmin, grantsHrAccess] of seedRoles) {
+    const existingRole = await prepare('SELECT id FROM employee_roles WHERE name = ? AND department IS NULL').get(name);
+    if (!existingRole) {
+      await prepare(`
+        INSERT INTO employee_roles (name, department, grants_staff, grants_superadmin, grants_hr_access)
+        VALUES (?, NULL, ?, ?, ?)
+      `).run(name, grantsStaff, grantsSuperadmin, grantsHrAccess);
+    } else if (addedGrantsColumns) {
+      // Backfill único: estos roles ya existían de antes de que existiera
+      // el concepto de "otorgar acceso", así que la primera vez que la
+      // columna aparece se les carga el valor por defecto que les
+      // corresponde. Un superadmin puede cambiarlo después sin problema:
+      // esto no se vuelve a pisar en arranques futuros.
+      await prepare(`
+        UPDATE employee_roles SET grants_staff = ?, grants_superadmin = ?, grants_hr_access = ? WHERE id = ?
+      `).run(grantsStaff, grantsSuperadmin, grantsHrAccess, existingRole.id);
     }
   }
 
@@ -230,52 +323,54 @@ async function setup() {
   }
 
   // Migración única: el login de staff vivía separado en la tabla admins
-  // (panel de gestión) del de fichaje (tabla employees). Ahora es una sola
-  // cuenta, así que cada admin pasa a ser un empleado con is_staff = 1 la
-  // primera vez que el server arranca con este código. No se borra la
-  // tabla admins ni sus filas, solo se copian (si el username ya existe
-  // como empleado, se lo deja como está para no pisar nada).
+  // (panel de gestión) del de fichaje (tabla employees). Ahora es una
+  // sola cuenta, y el acceso lo da la división a la que pertenece (no una
+  // columna suelta), así que cada admin migrado pasa a la división
+  // "Dirección" (que ya otorga staff + superadmin) para no perder acceso.
+  // No se borra la tabla admins ni sus filas, solo se copian (si el
+  // username ya existe como empleado, se lo deja como está).
   const adminRows = await prepare('SELECT * FROM admins').all();
   if (adminRows.length > 0) {
     const genericRank = await prepare('SELECT id FROM ranks WHERE level = 8 AND department IS NULL').get();
+    const direccionRole = await prepare("SELECT id FROM employee_roles WHERE name = 'Dirección' AND department IS NULL").get();
     for (const a of adminRows) {
       const existing = await prepare('SELECT id FROM employees WHERE username = ?').get(a.username);
       if (existing) continue;
-      await prepare(`
-        INSERT INTO employees
-          (full_name, department, rank_id, active, is_staff, is_superadmin, hr_access, username, password_hash, created_by)
-        VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?, 'migración')
-      `).run(
-        a.username, a.department || 'sams', genericRank.id,
-        a.department ? 0 : 1, a.hr_access ? 1 : 0, a.username, a.password_hash,
-      );
+      const info = await prepare(`
+        INSERT INTO employees (full_name, department, rank_id, active, username, password_hash, created_by)
+        VALUES (?, ?, ?, 1, ?, ?, 'migración')
+      `).run(a.username, a.department || 'sams', genericRank.id, a.username, a.password_hash);
+      if (direccionRole) {
+        await prepare('INSERT OR IGNORE INTO employee_role_links (employee_id, role_id) VALUES (?, ?)').run(info.lastInsertRowid, direccionRole.id);
+      }
     }
   }
 
   // Re-siembra el superadmin desde variables de entorno si están
   // presentes, útil para el primer arranque contra una base nueva. Ahora
-  // crea/actualiza directamente el empleado (login unificado), no la
-  // vieja tabla admins.
+  // crea/actualiza directamente el empleado (login unificado) y lo suma a
+  // la división "Dirección" para que tenga acceso total.
   if (process.env.ADMIN_USER && process.env.ADMIN_PASSWORD) {
     const bcrypt = require('bcryptjs');
     const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD, 10);
     const department = process.env.ADMIN_DEPARTMENT || 'sams';
-    const isSuperadmin = process.env.ADMIN_DEPARTMENT ? 0 : 1;
     const genericRank = await prepare('SELECT id FROM ranks WHERE level = 8 AND department IS NULL').get();
+    const direccionRole = await prepare("SELECT id FROM employee_roles WHERE name = 'Dirección' AND department IS NULL").get();
 
     const existing = await prepare('SELECT id FROM employees WHERE username = ?').get(process.env.ADMIN_USER);
+    let employeeId;
     if (existing) {
-      await prepare(`
-        UPDATE employees
-        SET password_hash = ?, department = ?, is_staff = 1, is_superadmin = ?, hr_access = 1, active = 1
-        WHERE id = ?
-      `).run(hash, department, isSuperadmin, existing.id);
+      await prepare('UPDATE employees SET password_hash = ?, department = ?, active = 1 WHERE id = ?').run(hash, department, existing.id);
+      employeeId = existing.id;
     } else {
-      await prepare(`
-        INSERT INTO employees
-          (full_name, department, rank_id, active, is_staff, is_superadmin, hr_access, username, password_hash, created_by)
-        VALUES (?, ?, ?, 1, 1, ?, 1, ?, ?, 'seed')
-      `).run(process.env.ADMIN_USER, department, genericRank.id, isSuperadmin, process.env.ADMIN_USER, hash);
+      const info = await prepare(`
+        INSERT INTO employees (full_name, department, rank_id, active, username, password_hash, created_by)
+        VALUES (?, ?, ?, 1, ?, ?, 'seed')
+      `).run(process.env.ADMIN_USER, department, genericRank.id, process.env.ADMIN_USER, hash);
+      employeeId = info.lastInsertRowid;
+    }
+    if (direccionRole) {
+      await prepare('INSERT OR IGNORE INTO employee_role_links (employee_id, role_id) VALUES (?, ?)').run(employeeId, direccionRole.id);
     }
   }
 }

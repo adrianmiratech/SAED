@@ -23,6 +23,7 @@ const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 const STATUS_LABELS = { pendiente: 'Pendiente', en_revision: 'En revisión', aprobado: 'Aprobado', rechazado: 'Rechazado' };
 const PAGE_TITLES = {
   fichaje: ['Mi Fichaje', 'Marcá tu entrada y salida, y consultá tu historial.'],
+  informes: ['Informes', 'Completá las plantillas de tu departamento y revisá tu historial.'],
   postulaciones: ['Postulaciones', 'Revisá, filtrá y gestioná las postulaciones a SAMS y SAFD.'],
   personal: ['Personal', 'Roster de empleados, rangos, roles y nómina del SAED.'],
   fichajes: ['Fichajes', 'Control de entrada y salida del personal.'],
@@ -121,6 +122,7 @@ async function checkSession() {
   });
   document.getElementById('nav-section-rrhh').style.display = (canManageNow || canViewAttendance) ? '' : 'none';
   document.getElementById('fichajes-nav-btn').style.display = canViewAttendance ? '' : 'none';
+  manageTemplatesBtn.style.display = canManageNow ? 'inline-flex' : 'none';
 
   switchTab(canManageNow ? 'postulaciones' : 'fichaje');
 }
@@ -378,7 +380,7 @@ document.getElementById('export-btn').addEventListener('click', () => {
 
 // ---------- Navegación entre módulos (sidebar) ----------
 
-const TAB_IDS = ['fichaje', 'postulaciones', 'personal', 'fichajes', 'inventario', 'atenciones'];
+const TAB_IDS = ['fichaje', 'informes', 'postulaciones', 'personal', 'fichajes', 'inventario', 'atenciones'];
 
 async function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
@@ -395,6 +397,9 @@ async function switchTab(tab) {
   if (tab === 'fichaje') {
     loadMyClockStatus();
     loadMyClockHistory();
+  } else if (tab === 'informes') {
+    await loadTemplates();
+    loadMyReports();
   } else if (tab === 'postulaciones') {
     loadApplications();
   } else if (tab === 'personal') {
@@ -484,6 +489,471 @@ clockBtn.addEventListener('click', async () => {
   }
 });
 
+// ---------- Informes (plantillas por departamento) ----------
+
+let reportTemplates = [];
+let myReports = [];
+let currentTemplateFields = [];
+let currentEditingTemplateId = null;
+let currentFillTemplate = null;
+let currentSubmissionsTemplateId = null;
+
+const templatesListEl = document.getElementById('templates-list');
+const templatesEmptyEl = document.getElementById('templates-empty');
+const myReportsListEl = document.getElementById('my-reports-list');
+const myReportsEmptyEl = document.getElementById('my-reports-empty');
+const manageTemplatesBtn = document.getElementById('manage-templates-btn');
+const templatesModalBackdrop = document.getElementById('templates-modal-backdrop');
+const templatesManageView = document.getElementById('templates-manage-view');
+const templatesManageItems = document.getElementById('templates-manage-items');
+const templateEditor = document.getElementById('template-editor');
+const templateNameInput = document.getElementById('template-name');
+const templateDescriptionInput = document.getElementById('template-description');
+const templateDepartmentField = document.getElementById('template-department-field');
+const templateDepartmentSelect = document.getElementById('template-department');
+const templateActiveField = document.getElementById('template-active-field');
+const templateActiveCheckbox = document.getElementById('template-active');
+const templateFieldsList = document.getElementById('template-fields-list');
+const templateMessage = document.getElementById('template-message');
+const fillReportModalBackdrop = document.getElementById('fill-report-modal-backdrop');
+const fillReportForm = document.getElementById('fill-report-form');
+const fillReportFields = document.getElementById('fill-report-fields');
+const fillReportMessage = document.getElementById('fill-report-message');
+const submissionsModalBackdrop = document.getElementById('submissions-modal-backdrop');
+const submissionsListEl = document.getElementById('submissions-list');
+const submissionsEmptyEl = document.getElementById('submissions-empty');
+
+async function loadTemplates() {
+  const res = await fetch('/api/report-templates');
+  if (res.status === 401) { window.location.href = '/login.html'; return; }
+  reportTemplates = await res.json();
+  renderTemplatesList();
+}
+
+function renderTemplatesList() {
+  const activeTemplates = reportTemplates.filter((t) => t.active);
+  templatesListEl.innerHTML = '';
+  if (activeTemplates.length === 0) {
+    templatesEmptyEl.style.display = 'block';
+    return;
+  }
+  templatesEmptyEl.style.display = 'none';
+  for (const t of activeTemplates) {
+    const row = document.createElement('div');
+    row.className = 'staff-row';
+    row.innerHTML = `
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(t.name)}</span>
+        ${t.description ? `<span class="muted-link">${escapeHtml(t.description)}</span>` : ''}
+      </div>
+      <button class="btn btn-primary btn-sm" data-fill-template="${t.id}">Completar</button>
+    `;
+    templatesListEl.appendChild(row);
+  }
+  templatesListEl.querySelectorAll('[data-fill-template]').forEach((btn) => {
+    btn.addEventListener('click', () => openFillReportModal(Number(btn.dataset.fillTemplate)));
+  });
+}
+
+async function loadMyReports() {
+  const res = await fetch('/api/report-submissions/mine');
+  if (!res.ok) return;
+  myReports = await res.json();
+  renderMyReports();
+}
+
+const REPORT_STATUS_LABELS = { pendiente: 'Pendiente', aprobado: 'Aprobado', rechazado: 'Rechazado' };
+const REPORT_STATUS_PILL_CLASS = { pendiente: 'status-pendiente', aprobado: 'status-aprobado', rechazado: 'status-rechazado' };
+
+function reportStatusPill(status) {
+  return `<span class="status-pill ${REPORT_STATUS_PILL_CLASS[status] || 'status-pendiente'}">${REPORT_STATUS_LABELS[status] || status}</span>`;
+}
+
+function reportPdfLinks(id) {
+  return `
+    <a class="btn btn-ghost btn-sm" href="/api/report-submissions/${id}/pdf" target="_blank" rel="noopener">Ver PDF</a>
+    <a class="btn btn-ghost btn-sm" href="/api/report-submissions/${id}/pdf?download=1">Descargar</a>
+  `;
+}
+
+function renderMyReports() {
+  myReportsListEl.innerHTML = '';
+  if (myReports.length === 0) {
+    myReportsEmptyEl.style.display = 'block';
+    return;
+  }
+  myReportsEmptyEl.style.display = 'none';
+  myReportsListEl.innerHTML = myReports.map((r) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(r.template_name)}</span>
+        ${reportStatusPill(r.status)}
+        <span class="muted-link">${formatDate(r.created_at)}</span>
+      </div>
+      ${reportPdfLinks(r.id)}
+    </div>
+  `).join('');
+}
+
+function renderFillField(f) {
+  const req = f.required ? 'required' : '';
+  const labelHtml = `<label for="fill-field-${escapeHtml(f.key)}">${escapeHtml(f.label)}${f.required ? '' : ' <span class="hint">(opcional)</span>'}</label>`;
+  if (f.type === 'textarea') {
+    return `${labelHtml}<textarea id="fill-field-${escapeHtml(f.key)}" data-field-key="${escapeHtml(f.key)}" ${req}></textarea>`;
+  }
+  if (f.type === 'select') {
+    const options = (f.options || []).map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
+    return `${labelHtml}<select id="fill-field-${escapeHtml(f.key)}" data-field-key="${escapeHtml(f.key)}" ${req}><option value="" disabled selected>Elegí una opción</option>${options}</select>`;
+  }
+  const type = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text';
+  return `${labelHtml}<input type="${type}" id="fill-field-${escapeHtml(f.key)}" data-field-key="${escapeHtml(f.key)}" ${req} />`;
+}
+
+function openFillReportModal(templateId) {
+  const t = reportTemplates.find((x) => x.id === templateId);
+  if (!t) return;
+  currentFillTemplate = t;
+  document.getElementById('fill-report-title').textContent = t.name;
+  document.getElementById('fill-report-sub').textContent = t.description || '';
+  fillReportMessage.className = 'message';
+  fillReportMessage.textContent = '';
+  fillReportForm.reset();
+
+  fillReportFields.innerHTML = t.fields.map((f) => renderFillField(f)).join('');
+  fillReportModalBackdrop.classList.add('open');
+}
+
+function closeFillReportModal() {
+  fillReportModalBackdrop.classList.remove('open');
+  currentFillTemplate = null;
+}
+
+fillReportForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!currentFillTemplate) return;
+  fillReportMessage.className = 'message';
+  fillReportMessage.textContent = '';
+
+  const data = {};
+  fillReportFields.querySelectorAll('[data-field-key]').forEach((el) => {
+    data[el.dataset.fieldKey] = el.value;
+  });
+
+  const submitBtn = document.getElementById('fill-report-submit');
+  submitBtn.disabled = true;
+  try {
+    const res = await fetch(`/api/report-templates/${currentFillTemplate.id}/submissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+    });
+    const resData = await res.json();
+    if (!res.ok) throw new Error(resData.error || 'No se pudo enviar el informe');
+
+    showToast('Informe enviado.');
+    closeFillReportModal();
+    await loadMyReports();
+  } catch (err) {
+    fillReportMessage.className = 'message error';
+    fillReportMessage.textContent = err.message;
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+document.getElementById('fill-report-modal-close').addEventListener('click', closeFillReportModal);
+fillReportModalBackdrop.addEventListener('click', (e) => {
+  if (e.target === fillReportModalBackdrop) closeFillReportModal();
+});
+
+// ---------- Gestión de plantillas (staff) ----------
+
+function openTemplatesModal() {
+  templatesManageView.style.display = 'block';
+  templateEditor.style.display = 'none';
+  renderTemplatesManageList();
+  templatesModalBackdrop.classList.add('open');
+}
+
+function closeTemplatesModal() {
+  templatesModalBackdrop.classList.remove('open');
+}
+
+function renderTemplatesManageList() {
+  if (reportTemplates.length === 0) {
+    templatesManageItems.innerHTML = '<div class="staff-empty">No hay plantillas creadas todavía.</div>';
+    return;
+  }
+  templatesManageItems.innerHTML = reportTemplates.map((t) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(t.name)}</span>
+        <span class="status-pill ${t.active ? 'status-aprobado' : 'status-pendiente'}">${t.active ? 'Activa' : 'Inactiva'}</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-view-submissions="${t.id}">Respuestas</button>
+      <button class="btn btn-ghost btn-sm" data-edit-template="${t.id}">Editar</button>
+      <button class="btn btn-danger btn-sm" data-delete-template="${t.id}">Eliminar</button>
+    </div>
+  `).join('');
+
+  templatesManageItems.querySelectorAll('[data-view-submissions]').forEach((btn) => {
+    btn.addEventListener('click', () => openSubmissionsModal(Number(btn.dataset.viewSubmissions)));
+  });
+  templatesManageItems.querySelectorAll('[data-edit-template]').forEach((btn) => {
+    btn.addEventListener('click', () => openTemplateEditor(Number(btn.dataset.editTemplate)));
+  });
+  templatesManageItems.querySelectorAll('[data-delete-template]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta plantilla y todas sus respuestas?')) return;
+      await fetch(`/api/report-templates/${btn.dataset.deleteTemplate}`, { method: 'DELETE' });
+      await loadTemplates();
+      renderTemplatesManageList();
+      showToast('Plantilla eliminada.', 'danger');
+    });
+  });
+}
+
+function renderFieldEditorRows() {
+  if (currentTemplateFields.length === 0) {
+    templateFieldsList.innerHTML = '<div class="staff-empty">Todavía no agregaste ningún campo.</div>';
+    return;
+  }
+  templateFieldsList.innerHTML = currentTemplateFields.map((f, i) => `
+    <div class="field-row" data-index="${i}">
+      <div class="row">
+        <div>
+          <label>Etiqueta</label>
+          <input type="text" class="field-label-input" value="${escapeHtml(f.label)}" placeholder="Ej: Resumen del turno" />
+        </div>
+        <div>
+          <label>Tipo</label>
+          <select class="field-type-input">
+            <option value="text" ${f.type === 'text' ? 'selected' : ''}>Texto corto</option>
+            <option value="textarea" ${f.type === 'textarea' ? 'selected' : ''}>Texto largo</option>
+            <option value="number" ${f.type === 'number' ? 'selected' : ''}>Número</option>
+            <option value="date" ${f.type === 'date' ? 'selected' : ''}>Fecha</option>
+            <option value="select" ${f.type === 'select' ? 'selected' : ''}>Opciones (elegir una)</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-options-wrap" style="display:${f.type === 'select' ? 'block' : 'none'}">
+        <label>Opciones <span class="hint">(separadas por coma)</span></label>
+        <input type="text" class="field-options-input" value="${escapeHtml((f.options || []).join(', '))}" placeholder="Ej: Bueno, Regular, Dañado" />
+      </div>
+      <div class="field-row-footer">
+        <label class="active-check-label"><input type="checkbox" class="field-required-input" ${f.required ? 'checked' : ''} style="width:auto" /> Obligatorio</label>
+        <button type="button" class="btn btn-danger btn-sm remove-field-btn">Eliminar campo</button>
+      </div>
+    </div>
+  `).join('');
+
+  templateFieldsList.querySelectorAll('.field-row').forEach((rowEl) => {
+    const idx = Number(rowEl.dataset.index);
+    rowEl.querySelector('.field-label-input').addEventListener('input', (e) => { currentTemplateFields[idx].label = e.target.value; });
+    rowEl.querySelector('.field-type-input').addEventListener('change', (e) => {
+      currentTemplateFields[idx].type = e.target.value;
+      rowEl.querySelector('.field-options-wrap').style.display = e.target.value === 'select' ? 'block' : 'none';
+    });
+    const optionsInput = rowEl.querySelector('.field-options-input');
+    if (optionsInput) {
+      optionsInput.addEventListener('input', (e) => {
+        currentTemplateFields[idx].options = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+      });
+    }
+    rowEl.querySelector('.field-required-input').addEventListener('change', (e) => { currentTemplateFields[idx].required = e.target.checked; });
+    rowEl.querySelector('.remove-field-btn').addEventListener('click', () => {
+      currentTemplateFields.splice(idx, 1);
+      renderFieldEditorRows();
+    });
+  });
+}
+
+function openTemplateEditor(templateId) {
+  currentEditingTemplateId = templateId || null;
+  templatesManageView.style.display = 'none';
+  templateEditor.style.display = 'block';
+  templateMessage.className = 'message';
+  templateMessage.textContent = '';
+
+  if (templateId) {
+    const t = reportTemplates.find((x) => x.id === templateId);
+    templateNameInput.value = t.name;
+    templateDescriptionInput.value = t.description || '';
+    currentTemplateFields = t.fields.map((f) => ({ ...f }));
+    templateDepartmentField.style.display = 'none';
+    templateActiveField.style.display = 'flex';
+    templateActiveCheckbox.checked = !!t.active;
+  } else {
+    templateNameInput.value = '';
+    templateDescriptionInput.value = '';
+    currentTemplateFields = [];
+    templateDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
+    templateDepartmentSelect.value = scopedDepartment || currentPersonalDeptFilter || 'sams';
+    templateActiveField.style.display = 'none';
+  }
+  renderFieldEditorRows();
+}
+
+document.getElementById('add-field-btn').addEventListener('click', () => {
+  currentTemplateFields.push({ key: `campo_${Date.now()}_${currentTemplateFields.length}`, label: '', type: 'text', required: false });
+  renderFieldEditorRows();
+});
+
+document.getElementById('template-cancel-btn').addEventListener('click', () => {
+  templatesManageView.style.display = 'block';
+  templateEditor.style.display = 'none';
+});
+
+document.getElementById('template-save-btn').addEventListener('click', async () => {
+  templateMessage.className = 'message';
+  templateMessage.textContent = '';
+
+  const name = templateNameInput.value.trim();
+  const description = templateDescriptionInput.value.trim();
+
+  if (!name) {
+    templateMessage.className = 'message error';
+    templateMessage.textContent = 'Ingresá un nombre para la plantilla.';
+    return;
+  }
+  if (currentTemplateFields.length === 0) {
+    templateMessage.className = 'message error';
+    templateMessage.textContent = 'Agregá al menos un campo.';
+    return;
+  }
+  for (const f of currentTemplateFields) {
+    if (!f.label.trim()) {
+      templateMessage.className = 'message error';
+      templateMessage.textContent = 'Todos los campos necesitan una etiqueta.';
+      return;
+    }
+    if (f.type === 'select' && (!f.options || f.options.length === 0)) {
+      templateMessage.className = 'message error';
+      templateMessage.textContent = `El campo "${f.label}" necesita al menos una opción.`;
+      return;
+    }
+  }
+
+  const isEdit = !!currentEditingTemplateId;
+  const body = { name, description, fields: currentTemplateFields };
+  if (!isEdit) body.department = scopedDepartment || templateDepartmentSelect.value;
+  else body.active = templateActiveCheckbox.checked;
+
+  try {
+    const url = isEdit ? `/api/report-templates/${currentEditingTemplateId}` : '/api/report-templates';
+    const method = isEdit ? 'PATCH' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar la plantilla');
+
+    showToast(isEdit ? 'Plantilla actualizada.' : 'Plantilla creada.');
+    await loadTemplates();
+    templatesManageView.style.display = 'block';
+    templateEditor.style.display = 'none';
+    renderTemplatesManageList();
+  } catch (err) {
+    templateMessage.className = 'message error';
+    templateMessage.textContent = err.message;
+  }
+});
+
+document.getElementById('new-template-btn').addEventListener('click', () => openTemplateEditor(null));
+manageTemplatesBtn.addEventListener('click', openTemplatesModal);
+document.getElementById('templates-modal-close').addEventListener('click', closeTemplatesModal);
+templatesModalBackdrop.addEventListener('click', (e) => {
+  if (e.target === templatesModalBackdrop) closeTemplatesModal();
+});
+
+async function openSubmissionsModal(templateId) {
+  currentSubmissionsTemplateId = templateId;
+  const t = reportTemplates.find((x) => x.id === templateId);
+  document.getElementById('submissions-modal-title').textContent = t ? t.name : 'Respuestas';
+  document.getElementById('submissions-modal-sub').textContent = 'Informes enviados con esta plantilla.';
+  submissionsListEl.innerHTML = '';
+  submissionsEmptyEl.style.display = 'none';
+  submissionsModalBackdrop.classList.add('open');
+
+  const res = await fetch(`/api/report-templates/${templateId}/submissions`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  renderSubmissionsList(rows, t);
+}
+
+function renderSubmissionsList(rows, template) {
+  if (rows.length === 0) {
+    submissionsListEl.innerHTML = '';
+    submissionsEmptyEl.style.display = 'block';
+    return;
+  }
+  submissionsEmptyEl.style.display = 'none';
+  submissionsListEl.innerHTML = rows.map((s) => `
+    <div class="field-row">
+      <div class="field-row-footer" style="margin-top:0;">
+        <span class="staff-username">${escapeHtml(s.employee_name)}</span>
+        ${reportStatusPill(s.status)}
+        <span class="muted-link">${formatDate(s.created_at)}</span>
+      </div>
+      ${(template ? template.fields : []).map((f) => `
+        <div class="report-field-value">
+          <div class="k">${escapeHtml(f.label)}</div>
+          <div class="v">${escapeHtml(String(s.data[f.key] ?? '') || '—')}</div>
+        </div>
+      `).join('')}
+      ${s.review_notes ? `
+        <div class="report-field-value">
+          <div class="k">Notas de revisión</div>
+          <div class="v">${escapeHtml(s.review_notes)}</div>
+        </div>
+      ` : ''}
+      <div class="review-decision" style="margin-top:10px;">
+        <button class="btn btn-ok review-btn" data-review="${s.id}" data-status="aprobado"><span class="review-btn-icon">✓</span> Aprobar</button>
+        <button class="btn btn-danger review-btn" data-review="${s.id}" data-status="rechazado"><span class="review-btn-icon">✕</span> Rechazar</button>
+      </div>
+      <div class="submit-row" style="margin-top:10px;">
+        ${reportPdfLinks(s.id)}
+        <button class="btn btn-danger btn-sm" data-delete-submission="${s.id}">Eliminar</button>
+      </div>
+    </div>
+  `).join('');
+
+  submissionsListEl.querySelectorAll('[data-review]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const res = await fetch(`/api/report-submissions/${btn.dataset.review}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: btn.dataset.status }),
+      });
+      if (res.ok) {
+        await openSubmissionsModal(currentSubmissionsTemplateId);
+        showToast(btn.dataset.status === 'aprobado' ? 'Informe aprobado.' : 'Informe rechazado.', btn.dataset.status === 'aprobado' ? undefined : 'danger');
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'No se pudo actualizar el informe.', 'danger');
+      }
+    });
+  });
+
+  submissionsListEl.querySelectorAll('[data-delete-submission]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este informe enviado?')) return;
+      await fetch(`/api/report-submissions/${btn.dataset.deleteSubmission}`, { method: 'DELETE' });
+      await openSubmissionsModal(currentSubmissionsTemplateId);
+      showToast('Informe eliminado.', 'danger');
+    });
+  });
+}
+
+document.getElementById('submissions-modal-close').addEventListener('click', () => {
+  submissionsModalBackdrop.classList.remove('open');
+});
+submissionsModalBackdrop.addEventListener('click', (e) => {
+  if (e.target === submissionsModalBackdrop) submissionsModalBackdrop.classList.remove('open');
+});
+
 document.getElementById('personal-search-input').addEventListener('input', (e) => {
   currentPersonalSearch = e.target.value.trim();
   renderEmployeesBoard();
@@ -518,13 +988,13 @@ function populateRankSelect(department, selectedRankId, selectEl = employeeRankS
 
 employeeDepartmentSelect.addEventListener('change', () => {
   populateRankSelect(employeeDepartmentSelect.value);
-  populateRoleSelect(employeeDepartmentSelect.value);
+  populateRolesChecklist(employeeDepartmentSelect.value);
 });
 
 // ---------- Roles / divisiones ----------
 
 let employeeRoles = [];
-const employeeRoleSelect = document.getElementById('employee-role');
+const employeeRolesChecklist = document.getElementById('employee-roles-checklist');
 const rolesBtn = document.getElementById('roles-btn');
 const rolesModalBackdrop = document.getElementById('roles-modal-backdrop');
 const rolesListEl = document.getElementById('roles-list');
@@ -541,12 +1011,24 @@ function rolesForDepartment(department) {
   return employeeRoles.filter((r) => !r.department || r.department === department);
 }
 
-function populateRoleSelect(department, selectedRoleId) {
+// El acceso lo otorga automáticamente la división, así que solo un
+// superadmin puede tildar/destildar; el resto del staff lo ve de solo lectura.
+function populateRolesChecklist(department, selectedRoleIds = []) {
   const list = rolesForDepartment(department);
-  employeeRoleSelect.innerHTML = '<option value="">Sin rol asignado</option>' + list.map((r) => (
-    `<option value="${r.id}">${escapeHtml(r.name)}</option>`
-  )).join('');
-  employeeRoleSelect.value = selectedRoleId || '';
+  if (list.length === 0) {
+    employeeRolesChecklist.innerHTML = '<div class="staff-empty">No hay divisiones cargadas todavía.</div>';
+    return;
+  }
+  employeeRolesChecklist.innerHTML = list.map((r) => `
+    <label>
+      <input type="checkbox" value="${r.id}" ${selectedRoleIds.includes(r.id) ? 'checked' : ''} ${isSuperadmin ? '' : 'disabled'} />
+      ${escapeHtml(r.name)}
+    </label>
+  `).join('');
+}
+
+function getSelectedRoleIds() {
+  return Array.from(employeeRolesChecklist.querySelectorAll('input[type="checkbox"]:checked')).map((c) => Number(c.value));
 }
 
 async function openRolesModal() {
@@ -558,9 +1040,13 @@ async function openRolesModal() {
   rolesModalBackdrop.classList.add('open');
 }
 
+function roleGrantsBadge(active, label) {
+  return `<span class="status-pill ${active ? 'status-aprobado' : 'status-pendiente'}">${active ? '✓ ' : ''}${label}</span>`;
+}
+
 function renderRolesList() {
   if (employeeRoles.length === 0) {
-    rolesListEl.innerHTML = '<div class="staff-empty">No hay roles cargados.</div>';
+    rolesListEl.innerHTML = '<div class="staff-empty">No hay divisiones cargadas.</div>';
     return;
   }
   rolesListEl.innerHTML = employeeRoles.map((r) => `
@@ -568,18 +1054,41 @@ function renderRolesList() {
       <div class="staff-meta">
         <span class="staff-username">${escapeHtml(r.name)}</span>
         ${r.department ? `<span class="dept-badge dept-${r.department}">${departmentLabel(r.department)}</span>` : '<span class="dept-badge">Compartido</span>'}
+        <button class="status-pill" style="border:none;cursor:pointer" data-toggle-grant="${r.id}" data-grant="grants_staff" data-value="${r.grants_staff ? '0' : '1'}">${roleGrantsBadge(!!r.grants_staff, 'Staff')}</button>
+        <button class="status-pill" style="border:none;cursor:pointer" data-toggle-grant="${r.id}" data-grant="grants_superadmin" data-value="${r.grants_superadmin ? '0' : '1'}">${roleGrantsBadge(!!r.grants_superadmin, 'Superadmin')}</button>
+        <button class="status-pill" style="border:none;cursor:pointer" data-toggle-grant="${r.id}" data-grant="grants_hr_access" data-value="${r.grants_hr_access ? '0' : '1'}">${roleGrantsBadge(!!r.grants_hr_access, 'Fichajes')}</button>
       </div>
       <button class="btn btn-danger btn-sm" data-delete-role="${r.id}">Eliminar</button>
     </div>
   `).join('');
 
+  rolesListEl.querySelectorAll('[data-toggle-grant]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const grantKey = btn.dataset.grant;
+      const bodyKey = { grants_staff: 'grantsStaff', grants_superadmin: 'grantsSuperadmin', grants_hr_access: 'grantsHrAccess' }[grantKey];
+      const res = await fetch(`/api/employee-roles/${btn.dataset.toggleGrant}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [bodyKey]: btn.dataset.value === '1' }),
+      });
+      if (res.ok) {
+        await loadEmployeeRoles();
+        renderRolesList();
+        showToast('División actualizada.');
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'No se pudo actualizar la división.', 'danger');
+      }
+    });
+  });
+
   rolesListEl.querySelectorAll('[data-delete-role]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      if (!confirm('¿Eliminar este rol? Los empleados que lo tenían quedarán sin rol asignado.')) return;
+      if (!confirm('¿Eliminar esta división? Se le va a quitar a todos los empleados que la tenían.')) return;
       await fetch(`/api/employee-roles/${btn.dataset.deleteRole}`, { method: 'DELETE' });
       await loadEmployeeRoles();
       renderRolesList();
-      showToast('Rol eliminado.', 'danger');
+      showToast('División eliminada.', 'danger');
     });
   });
 }
@@ -595,20 +1104,23 @@ roleForm.addEventListener('submit', async (e) => {
 
   const name = document.getElementById('role-name').value.trim();
   const department = document.getElementById('role-department').value;
+  const grantsStaff = document.getElementById('role-grants-staff').checked;
+  const grantsSuperadmin = document.getElementById('role-grants-superadmin').checked;
+  const grantsHrAccess = document.getElementById('role-grants-hr').checked;
 
   try {
     const res = await fetch('/api/employee-roles', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, department: department || undefined }),
+      body: JSON.stringify({ name, department: department || undefined, grantsStaff, grantsSuperadmin, grantsHrAccess }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'No se pudo crear el rol');
+    if (!res.ok) throw new Error(data.error || 'No se pudo crear la división');
 
     roleForm.reset();
     await loadEmployeeRoles();
     renderRolesList();
-    showToast(`Rol "${data.name}" creado.`);
+    showToast('División creada.');
   } catch (err) {
     roleMessage.className = 'message error';
     roleMessage.textContent = err.message;
@@ -780,7 +1292,6 @@ function openNewEmployeeModal() {
   employeeActiveField.style.display = 'none';
   employeePayrollSection.style.display = 'none';
   document.getElementById('employee-fichaje-section').style.display = 'none';
-  document.getElementById('employee-access-section').style.display = 'none';
   employeeDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
 
   // Si hay un filtro de departamento activo, el nuevo empleado arranca en
@@ -788,7 +1299,7 @@ function openNewEmployeeModal() {
   const initialDept = scopedDepartment || currentPersonalDeptFilter || 'sams';
   employeeDepartmentSelect.value = initialDept;
   populateRankSelect(initialDept);
-  populateRoleSelect(initialDept);
+  populateRolesChecklist(initialDept, []);
 
   employeeModalBackdrop.classList.add('open');
 }
@@ -817,22 +1328,12 @@ async function openEmployeeModal(id) {
     : 'Este empleado todavía no tiene cuenta para entrar al sistema.';
   document.getElementById('employee-fichaje-username').value = e.username || '';
 
-  const accessSection = document.getElementById('employee-access-section');
-  if (isSuperadmin) {
-    accessSection.style.display = 'block';
-    document.getElementById('employee-is-staff').checked = !!e.is_staff;
-    document.getElementById('employee-is-superadmin').checked = !!e.is_superadmin;
-    document.getElementById('employee-hr-access').checked = !!e.hr_access;
-  } else {
-    accessSection.style.display = 'none';
-  }
-
   document.getElementById('employee-fullname').value = e.full_name;
   document.getElementById('employee-phone').value = e.phone || '';
   document.getElementById('employee-discord').value = e.discord_info || '';
   employeeActiveCheckbox.checked = !!e.active;
   populateRankSelect(e.department, e.rank_id);
-  populateRoleSelect(e.department, e.role_id);
+  populateRolesChecklist(e.department, e.role_ids || []);
 
   employeeModalBackdrop.classList.add('open');
   await loadPayroll(id);
@@ -852,7 +1353,6 @@ employeeForm.addEventListener('submit', async (e) => {
   const phone = document.getElementById('employee-phone').value.trim();
   const discordInfo = document.getElementById('employee-discord').value.trim();
   const rankId = Number(employeeRankSelect.value);
-  const roleId = employeeRoleSelect.value || null;
   const department = scopedDepartment || employeeDepartmentSelect.value;
 
   const submitBtn = employeeFormSubmit;
@@ -863,8 +1363,12 @@ employeeForm.addEventListener('submit', async (e) => {
     const url = isEdit ? `/api/employees/${currentEmployeeId}` : '/api/employees';
     const method = isEdit ? 'PATCH' : 'POST';
     const body = isEdit
-      ? { fullName, phone, discordInfo, rankId, roleId, active: employeeActiveCheckbox.checked }
-      : { fullName, phone, discordInfo, rankId, roleId, department };
+      ? { fullName, phone, discordInfo, rankId, active: employeeActiveCheckbox.checked }
+      : { fullName, phone, discordInfo, rankId, department };
+    // Las divisiones otorgan acceso automáticamente, así que solo se
+    // mandan si quien está logueado es superadmin (el resto ni las ve
+    // habilitadas para tocar).
+    if (isSuperadmin) body.roleIds = getSelectedRoleIds();
 
     const res = await fetch(url, {
       method,
@@ -930,32 +1434,6 @@ document.getElementById('employee-fichaje-save-btn').addEventListener('click', a
   }
 });
 
-document.getElementById('employee-access-save-btn').addEventListener('click', async () => {
-  if (!currentEmployeeId) return;
-  const accessMessage = document.getElementById('employee-access-message');
-  accessMessage.className = 'message';
-  accessMessage.textContent = '';
-
-  const isStaffChecked = document.getElementById('employee-is-staff').checked;
-  const isSuperadminChecked = document.getElementById('employee-is-superadmin').checked;
-  const hrAccessChecked = document.getElementById('employee-hr-access').checked;
-
-  try {
-    const res = await fetch(`/api/employees/${currentEmployeeId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isStaff: isStaffChecked, isSuperadmin: isSuperadminChecked, hrAccess: hrAccessChecked }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el nivel de acceso');
-
-    await loadEmployees();
-    showToast('Nivel de acceso actualizado.');
-  } catch (err) {
-    accessMessage.className = 'message error';
-    accessMessage.textContent = err.message;
-  }
-});
 
 employeeDeleteBtn.addEventListener('click', async () => {
   if (!currentEmployeeId) return;
@@ -1112,6 +1590,9 @@ document.addEventListener('keydown', (e) => {
   if (rolesModalBackdrop.classList.contains('open')) closeRolesModal();
   if (inventoryModalBackdrop.classList.contains('open')) closeInventoryModal();
   if (caseModalBackdrop.classList.contains('open')) closeCaseModal();
+  if (templatesModalBackdrop.classList.contains('open')) closeTemplatesModal();
+  if (fillReportModalBackdrop.classList.contains('open')) closeFillReportModal();
+  if (submissionsModalBackdrop.classList.contains('open')) submissionsModalBackdrop.classList.remove('open');
 });
 
 // ---------- Fichajes (vista de RRHH / Dirección) ----------

@@ -608,6 +608,74 @@ input[type="date"]#attendance-to-input {
   font-size: 13px;
 }
 
+.review-decision {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 4px;
+}
+.review-btn {
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 10px;
+  font-size: 14px;
+  border-radius: var(--radius);
+}
+.review-btn-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+.review-secondary {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: center;
+}
+
+.checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 6px;
+}
+.checklist label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-weight: 400;
+  font-size: 13.5px;
+}
+.checklist input { width: auto; }
+
+.field-row {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px 8px;
+  margin-bottom: 10px;
+}
+
+.field-row-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 10px 0 8px;
+}
+
+.report-field-value {
+  margin-bottom: 10px;
+}
+.report-field-value .k {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+.report-field-value .v {
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
 .low-stock-banner {
   background: var(--danger-bg);
   border: 1px solid rgba(229, 72, 77, 0.4);

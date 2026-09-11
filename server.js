@@ -3,6 +3,7 @@ const path = require('path');
 const express = require('express');
 const cookieSession = require('cookie-session');
 const bcrypt = require('bcryptjs');
+const PDFDocument = require('pdfkit');
 const db = require('./db');
 
 const app = express();
@@ -62,6 +63,36 @@ function csvEscape(value) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+// El acceso (staff / superadmin / ver Fichajes) no es un casillero suelto
+// por empleado: lo otorga la división (o divisiones) a la que pertenece.
+// Alguien sin ninguna división otorgante simplemente no tiene ese acceso.
+async function computeGrants(employeeId) {
+  const row = await db.prepare(`
+    SELECT
+      MAX(r.grants_staff) AS staff,
+      MAX(r.grants_superadmin) AS superadmin,
+      MAX(r.grants_hr_access) AS hr
+    FROM employee_role_links l
+    JOIN employee_roles r ON r.id = l.role_id
+    WHERE l.employee_id = ?
+  `).get(employeeId);
+  return {
+    isStaff: !!(row && row.staff),
+    isSuperadmin: !!(row && row.superadmin),
+    hrAccess: !!(row && row.hr),
+  };
+}
+
+async function countDistinctSuperadmins() {
+  const row = await db.prepare(`
+    SELECT COUNT(DISTINCT l.employee_id) AS c
+    FROM employee_role_links l
+    JOIN employee_roles r ON r.id = l.role_id
+    WHERE r.grants_superadmin = 1
+  `).get();
+  return row ? row.c : 0;
+}
+
 function sessionSnapshot(req) {
   return {
     authenticated: !!(req.session && req.session.employeeId),
@@ -90,13 +121,15 @@ app.post('/api/login', async (req, res) => {
     return res.status(403).json({ error: 'Tu cuenta está inactiva. Consultá con tu departamento.' });
   }
 
+  const grants = await computeGrants(employee.id);
+
   req.session.employeeId = employee.id;
   req.session.username = employee.username;
   req.session.fullName = employee.full_name;
   req.session.department = employee.department;
-  req.session.isStaff = !!employee.is_staff;
-  req.session.isSuperadmin = !!employee.is_superadmin;
-  req.session.hrAccess = !!employee.hr_access;
+  req.session.isStaff = grants.isStaff;
+  req.session.isSuperadmin = grants.isSuperadmin;
+  req.session.hrAccess = grants.hrAccess;
 
   res.json({ ok: true, ...sessionSnapshot(req) });
 });
@@ -388,8 +421,10 @@ app.patch('/api/ranks/:id', requireAuth, requireSuperAdmin, async (req, res) => 
 // ---------- Roles / divisiones ----------
 
 // A diferencia de los rangos (que definen jerarquía y tarifa por hora),
-// los roles son una etiqueta organizativa aparte: un mismo empleado puede
-// tener rango "Médico General" y rol "RTD" al mismo tiempo.
+// las divisiones son una etiqueta organizativa: un mismo empleado puede
+// pertenecer a varias a la vez (ej. "RTD" y "Recursos Humanos" juntas).
+// El acceso al panel (staff / superadmin / ver Fichajes) no es un
+// casillero aparte: lo otorga automáticamente la división en sí.
 app.get('/api/employee-roles', requireAuth, async (req, res) => {
   const scopedDept = scopedDepartment(req);
   const rows = scopedDept
@@ -399,28 +434,37 @@ app.get('/api/employee-roles', requireAuth, async (req, res) => {
 });
 
 app.post('/api/employee-roles', requireAuth, requireSuperAdmin, async (req, res) => {
-  const { name, department } = req.body || {};
-  if (!name) return res.status(400).json({ error: 'El nombre del rol es requerido' });
+  const { name, department, grantsStaff, grantsSuperadmin, grantsHrAccess } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'El nombre de la división es requerido' });
   if (department && !VALID_DEPARTMENTS.includes(department)) {
     return res.status(400).json({ error: 'Departamento inválido' });
   }
 
-  const info = await db.prepare('INSERT INTO employee_roles (name, department) VALUES (?, ?)').run(name.trim(), department || null);
-  res.status(201).json({ id: info.lastInsertRowid, name: name.trim(), department: department || null });
+  const info = await db.prepare(`
+    INSERT INTO employee_roles (name, department, grants_staff, grants_superadmin, grants_hr_access)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(name.trim(), department || null, grantsStaff ? 1 : 0, grantsSuperadmin ? 1 : 0, grantsHrAccess ? 1 : 0);
+  res.status(201).json({ id: info.lastInsertRowid });
 });
 
 app.patch('/api/employee-roles/:id', requireAuth, requireSuperAdmin, async (req, res) => {
   const role = await db.prepare('SELECT * FROM employee_roles WHERE id = ?').get(req.params.id);
-  if (!role) return res.status(404).json({ error: 'Rol no encontrado' });
+  if (!role) return res.status(404).json({ error: 'División no encontrada' });
 
-  const { name, department } = req.body || {};
+  const { name, department, grantsStaff, grantsSuperadmin, grantsHrAccess } = req.body || {};
   if (department !== undefined && department && !VALID_DEPARTMENTS.includes(department)) {
     return res.status(400).json({ error: 'Departamento inválido' });
   }
 
-  await db.prepare('UPDATE employee_roles SET name = ?, department = ? WHERE id = ?').run(
+  await db.prepare(`
+    UPDATE employee_roles SET name = ?, department = ?, grants_staff = ?, grants_superadmin = ?, grants_hr_access = ?
+    WHERE id = ?
+  `).run(
     name !== undefined ? name.trim() : role.name,
     department !== undefined ? (department || null) : role.department,
+    grantsStaff !== undefined ? (grantsStaff ? 1 : 0) : role.grants_staff,
+    grantsSuperadmin !== undefined ? (grantsSuperadmin ? 1 : 0) : role.grants_superadmin,
+    grantsHrAccess !== undefined ? (grantsHrAccess ? 1 : 0) : role.grants_hr_access,
     req.params.id,
   );
   res.json({ ok: true });
@@ -428,18 +472,25 @@ app.patch('/api/employee-roles/:id', requireAuth, requireSuperAdmin, async (req,
 
 app.delete('/api/employee-roles/:id', requireAuth, requireSuperAdmin, async (req, res) => {
   const role = await db.prepare('SELECT * FROM employee_roles WHERE id = ?').get(req.params.id);
-  if (!role) return res.status(404).json({ error: 'Rol no encontrado' });
+  if (!role) return res.status(404).json({ error: 'División no encontrada' });
 
-  await db.prepare('UPDATE employees SET role_id = NULL WHERE role_id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM employee_role_links WHERE role_id = ?').run(req.params.id);
   await db.prepare('DELETE FROM employee_roles WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
-async function validateRoleForDepartment(roleId, department) {
-  const role = await db.prepare('SELECT * FROM employee_roles WHERE id = ?').get(roleId);
-  if (!role) return null;
-  if (role.department && role.department !== department) return null;
-  return role;
+// Valida una lista de ids de división contra un departamento; devuelve
+// null si alguno no existe o no corresponde a ese departamento.
+async function validateRolesForDepartment(roleIds, department) {
+  const uniqueIds = [...new Set(roleIds)];
+  if (uniqueIds.length === 0) return [];
+  const placeholders = uniqueIds.map(() => '?').join(',');
+  const roles = await db.prepare(`SELECT * FROM employee_roles WHERE id IN (${placeholders})`).all(...uniqueIds);
+  if (roles.length !== uniqueIds.length) return null;
+  for (const r of roles) {
+    if (r.department && r.department !== department) return null;
+  }
+  return roles;
 }
 
 // ---------- Empleados ----------
@@ -448,7 +499,7 @@ async function validateRoleForDepartment(roleId, department) {
 // login de fichaje en las respuestas de la API.
 const EMPLOYEE_COLUMNS = `
   e.id, e.full_name, e.phone, e.discord_info, e.department, e.rank_id, e.active,
-  e.created_by, e.created_at, e.role_id, e.username, e.is_staff, e.is_superadmin, e.hr_access,
+  e.created_by, e.created_at, e.username,
   (e.username IS NOT NULL) AS has_login
 `;
 
@@ -470,14 +521,27 @@ app.get('/api/employees', requireAuth, async (req, res) => {
   const rows = await db.prepare(`
     SELECT ${EMPLOYEE_COLUMNS},
       r.level AS rank_level, r.name AS rank_name, r.hourly_rate AS rank_hourly_rate,
-      er.name AS role_name
+      COALESCE(MAX(er.grants_staff), 0) AS is_staff,
+      COALESCE(MAX(er.grants_superadmin), 0) AS is_superadmin,
+      COALESCE(MAX(er.grants_hr_access), 0) AS hr_access,
+      GROUP_CONCAT(er.id) AS role_ids_concat,
+      GROUP_CONCAT(er.name, '||') AS role_names_concat
     FROM employees e
     JOIN ranks r ON r.id = e.rank_id
-    LEFT JOIN employee_roles er ON er.id = e.role_id
+    LEFT JOIN employee_role_links erl ON erl.employee_id = e.id
+    LEFT JOIN employee_roles er ON er.id = erl.role_id
     ${where}
+    GROUP BY e.id
     ORDER BY e.active DESC, r.level DESC, e.full_name ASC
   `).all(...params);
-  res.json(rows);
+
+  res.json(rows.map((r) => ({
+    ...r,
+    role_ids: r.role_ids_concat ? r.role_ids_concat.split(',').map(Number) : [],
+    role_names: r.role_names_concat ? r.role_names_concat.split('||') : [],
+    role_ids_concat: undefined,
+    role_names_concat: undefined,
+  })));
 });
 
 async function validateRankForDepartment(rankId, department) {
@@ -488,7 +552,7 @@ async function validateRankForDepartment(rankId, department) {
 }
 
 app.post('/api/employees', requireAuth, async (req, res) => {
-  const { fullName, phone, discordInfo, rankId, roleId } = req.body || {};
+  const { fullName, phone, discordInfo, rankId, roleIds } = req.body || {};
   const scopedDept = scopedDepartment(req);
   const department = scopedDept || req.body?.department;
 
@@ -503,17 +567,23 @@ app.post('/api/employees', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Rango inválido para ese departamento' });
   }
 
-  let role_id = null;
-  if (roleId) {
-    const role = await validateRoleForDepartment(roleId, department);
-    if (!role) return res.status(400).json({ error: 'Rol inválido para ese departamento' });
-    role_id = role.id;
+  let roles = [];
+  if (roleIds && roleIds.length > 0) {
+    if (!req.session.isSuperadmin) {
+      return res.status(403).json({ error: 'Solo un superadmin puede asignar divisiones' });
+    }
+    roles = await validateRolesForDepartment(roleIds, department);
+    if (roles === null) return res.status(400).json({ error: 'Alguna división elegida no es válida para ese departamento' });
   }
 
   const info = await db.prepare(`
-    INSERT INTO employees (full_name, phone, discord_info, department, rank_id, role_id, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(fullName.trim(), phone.trim(), (discordInfo || '').trim() || null, department, rank.id, role_id, req.session.username);
+    INSERT INTO employees (full_name, phone, discord_info, department, rank_id, created_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(fullName.trim(), phone.trim(), (discordInfo || '').trim() || null, department, rank.id, req.session.username);
+
+  for (const r of roles) {
+    await db.prepare('INSERT INTO employee_role_links (employee_id, role_id) VALUES (?, ?)').run(info.lastInsertRowid, r.id);
+  }
 
   res.status(201).json({ id: info.lastInsertRowid });
 });
@@ -524,21 +594,8 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
   if (!requireDepartmentAccess(req, res, row)) return;
 
   const {
-    fullName, phone, discordInfo, rankId, active, roleId, fichajeUsername, fichajePassword,
-    isStaff, isSuperadmin, hrAccess,
+    fullName, phone, discordInfo, rankId, active, roleIds, fichajeUsername, fichajePassword,
   } = req.body || {};
-
-  // Solo un superadmin puede tocar el nivel de acceso de otra cuenta
-  // (staff, superadmin o RRHH/Dirección) — nunca desde una cuenta scoped.
-  if ((isStaff !== undefined || isSuperadmin !== undefined || hrAccess !== undefined) && !req.session.isSuperadmin) {
-    return res.status(403).json({ error: 'Solo un superadmin puede cambiar el nivel de acceso' });
-  }
-  if (isSuperadmin === false && row.is_superadmin) {
-    const superadminCount = (await db.prepare('SELECT COUNT(*) AS c FROM employees WHERE is_superadmin = 1').get()).c;
-    if (superadminCount <= 1) {
-      return res.status(400).json({ error: 'No podés quitarle el acceso al único superadmin' });
-    }
-  }
 
   let rank_id = row.rank_id;
   if (rankId !== undefined) {
@@ -547,14 +604,29 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
     rank_id = rank.id;
   }
 
-  let role_id = row.role_id;
-  if (roleId !== undefined) {
-    if (roleId) {
-      const role = await validateRoleForDepartment(roleId, row.department);
-      if (!role) return res.status(400).json({ error: 'Rol inválido para ese departamento' });
-      role_id = role.id;
-    } else {
-      role_id = null;
+  if (roleIds !== undefined) {
+    // Las divisiones otorgan acceso automáticamente, así que solo un
+    // superadmin puede reasignarlas (nunca desde una cuenta scoped).
+    if (!req.session.isSuperadmin) {
+      return res.status(403).json({ error: 'Solo un superadmin puede cambiar las divisiones de un empleado' });
+    }
+    const roles = roleIds.length > 0 ? await validateRolesForDepartment(roleIds, row.department) : [];
+    if (roles === null) return res.status(400).json({ error: 'Alguna división elegida no es válida para ese departamento' });
+
+    const willKeepSuperadmin = roles.some((r) => r.grants_superadmin);
+    if (!willKeepSuperadmin) {
+      const currentGrants = await computeGrants(row.id);
+      if (currentGrants.isSuperadmin) {
+        const superadminCount = await countDistinctSuperadmins();
+        if (superadminCount <= 1) {
+          return res.status(400).json({ error: 'No podés quitarle el acceso al único superadmin' });
+        }
+      }
+    }
+
+    await db.prepare('DELETE FROM employee_role_links WHERE employee_id = ?').run(row.id);
+    for (const r of roles) {
+      await db.prepare('INSERT INTO employee_role_links (employee_id, role_id) VALUES (?, ?)').run(row.id, r.id);
     }
   }
 
@@ -585,8 +657,7 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
 
   await db.prepare(`
     UPDATE employees
-    SET full_name = ?, phone = ?, discord_info = ?, rank_id = ?, active = ?, role_id = ?, username = ?, password_hash = ?,
-        is_staff = ?, is_superadmin = ?, hr_access = ?
+    SET full_name = ?, phone = ?, discord_info = ?, rank_id = ?, active = ?, username = ?, password_hash = ?
     WHERE id = ?
   `).run(
     fullName !== undefined ? fullName.trim() : row.full_name,
@@ -594,12 +665,8 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
     discordInfo !== undefined ? ((discordInfo || '').trim() || null) : row.discord_info,
     rank_id,
     active !== undefined ? (active ? 1 : 0) : row.active,
-    role_id,
     username,
     password_hash,
-    isStaff !== undefined ? (isStaff ? 1 : 0) : row.is_staff,
-    isSuperadmin !== undefined ? (isSuperadmin ? 1 : 0) : row.is_superadmin,
-    hrAccess !== undefined ? (hrAccess ? 1 : 0) : row.hr_access,
     req.params.id,
   );
 
@@ -614,13 +681,15 @@ app.delete('/api/employees/:id', requireAuth, async (req, res) => {
   if (row.id === req.session.employeeId) {
     return res.status(400).json({ error: 'No podés eliminar tu propia cuenta' });
   }
-  if (row.is_superadmin) {
-    const superadminCount = (await db.prepare('SELECT COUNT(*) AS c FROM employees WHERE is_superadmin = 1').get()).c;
+  const grants = await computeGrants(row.id);
+  if (grants.isSuperadmin) {
+    const superadminCount = await countDistinctSuperadmins();
     if (superadminCount <= 1) {
       return res.status(400).json({ error: 'No podés eliminar al único superadmin' });
     }
   }
 
+  await db.prepare('DELETE FROM employee_role_links WHERE employee_id = ?').run(req.params.id);
   await db.prepare('DELETE FROM payroll WHERE employee_id = ?').run(req.params.id);
   await db.prepare('DELETE FROM attendance WHERE employee_id = ?').run(req.params.id);
   await db.prepare('DELETE FROM employees WHERE id = ?').run(req.params.id);
@@ -1109,6 +1178,278 @@ app.get('/api/cases/:id/movements', requireAuth, async (req, res) => {
     ORDER BY m.created_at DESC
   `).all(req.params.id);
   res.json(rows);
+});
+
+// ---------- Informes (plantillas por departamento) ----------
+
+const VALID_FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'select'];
+
+function validateReportFields(fields) {
+  if (!Array.isArray(fields) || fields.length === 0) return 'La plantilla necesita al menos un campo';
+  const keys = new Set();
+  for (const f of fields) {
+    if (!f || typeof f.label !== 'string' || !f.label.trim()) return 'Cada campo necesita una etiqueta';
+    if (!VALID_FIELD_TYPES.includes(f.type)) return `Tipo de campo inválido: ${f.type}`;
+    if (f.type === 'select' && (!Array.isArray(f.options) || f.options.filter((o) => o && String(o).trim()).length === 0)) {
+      return `El campo "${f.label}" necesita al menos una opción`;
+    }
+    if (!f.key) return 'Cada campo necesita una clave interna';
+    if (keys.has(f.key)) return `Clave de campo repetida: ${f.key}`;
+    keys.add(f.key);
+  }
+  return null;
+}
+
+function normalizeReportFields(fields) {
+  return fields.map((f) => ({
+    key: String(f.key).trim(),
+    label: String(f.label).trim(),
+    type: f.type,
+    required: !!f.required,
+    ...(f.type === 'select' ? { options: f.options.map((o) => String(o).trim()).filter(Boolean) } : {}),
+  }));
+}
+
+function parseTemplateRow(r) {
+  return { ...r, fields: JSON.parse(r.fields_json) };
+}
+
+app.get('/api/report-templates', requireLoggedIn, async (req, res) => {
+  const { department } = req.query;
+  const scopedDept = scopedDepartment(req);
+  const targetDept = scopedDept || (department && VALID_DEPARTMENTS.includes(department) ? department : req.session.department);
+  if (!VALID_DEPARTMENTS.includes(targetDept)) return res.status(400).json({ error: 'Departamento inválido' });
+
+  const canManageDept = req.session.isSuperadmin || (req.session.isStaff && req.session.department === targetDept);
+  const where = canManageDept ? 'WHERE department = ?' : 'WHERE department = ? AND active = 1';
+  const rows = await db.prepare(`SELECT * FROM report_templates ${where} ORDER BY created_at DESC`).all(targetDept);
+  res.json(rows.map(parseTemplateRow));
+});
+
+app.post('/api/report-templates', requireAuth, async (req, res) => {
+  const { name, description, fields } = req.body || {};
+  const scopedDept = scopedDepartment(req);
+  const department = scopedDept || req.body?.department;
+
+  if (!name || !department) return res.status(400).json({ error: 'Nombre y departamento son requeridos' });
+  if (!VALID_DEPARTMENTS.includes(department)) return res.status(400).json({ error: 'Departamento inválido' });
+
+  const fieldsError = validateReportFields(fields);
+  if (fieldsError) return res.status(400).json({ error: fieldsError });
+
+  const info = await db.prepare(`
+    INSERT INTO report_templates (department, name, description, fields_json, created_by)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(department, name.trim(), (description || '').trim() || null, JSON.stringify(normalizeReportFields(fields)), req.session.username);
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+app.patch('/api/report-templates/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM report_templates WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  const { name, description, fields, active } = req.body || {};
+  let fieldsJson = row.fields_json;
+  if (fields !== undefined) {
+    const fieldsError = validateReportFields(fields);
+    if (fieldsError) return res.status(400).json({ error: fieldsError });
+    fieldsJson = JSON.stringify(normalizeReportFields(fields));
+  }
+
+  await db.prepare(`
+    UPDATE report_templates SET name = ?, description = ?, fields_json = ?, active = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    name !== undefined ? name.trim() : row.name,
+    description !== undefined ? ((description || '').trim() || null) : row.description,
+    fieldsJson,
+    active !== undefined ? (active ? 1 : 0) : row.active,
+    req.params.id,
+  );
+  res.json({ ok: true });
+});
+
+app.delete('/api/report-templates/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM report_templates WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  await db.prepare('DELETE FROM report_submissions WHERE template_id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM report_templates WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/report-templates/:id/submissions', requireLoggedIn, async (req, res) => {
+  const template = await db.prepare('SELECT * FROM report_templates WHERE id = ?').get(req.params.id);
+  if (!template || !template.active) return res.status(404).json({ error: 'No encontrada' });
+
+  const canAccess = req.session.isSuperadmin || req.session.department === template.department;
+  if (!canAccess) return res.status(403).json({ error: 'Esa plantilla no es de tu departamento' });
+
+  const { data } = req.body || {};
+  const fields = JSON.parse(template.fields_json);
+  for (const f of fields) {
+    const value = data?.[f.key];
+    if (f.required && (value === undefined || value === null || value === '')) {
+      return res.status(400).json({ error: `Falta completar "${f.label}"` });
+    }
+  }
+
+  const info = await db.prepare(`
+    INSERT INTO report_submissions (template_id, department, employee_id, data_json)
+    VALUES (?, ?, ?, ?)
+  `).run(template.id, template.department, req.session.employeeId, JSON.stringify(data || {}));
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+// Todo informe entra "pendiente" y queda así hasta que el staff de ese
+// departamento (quien gestiona las plantillas) lo aprueba o lo rechaza.
+const VALID_REPORT_STATUSES = ['pendiente', 'aprobado', 'rechazado'];
+
+app.patch('/api/report-submissions/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM report_submissions WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  const { status, reviewNotes } = req.body || {};
+  if (status && !VALID_REPORT_STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'Estado inválido' });
+  }
+
+  await db.prepare(`
+    UPDATE report_submissions
+    SET status = ?, review_notes = ?, reviewed_by = ?, reviewed_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    status || row.status,
+    reviewNotes !== undefined ? ((reviewNotes || '').trim() || null) : row.review_notes,
+    req.session.username,
+    req.params.id,
+  );
+
+  res.json({ ok: true });
+});
+
+app.get('/api/report-templates/:id/submissions', requireAuth, async (req, res) => {
+  const template = await db.prepare('SELECT * FROM report_templates WHERE id = ?').get(req.params.id);
+  if (!template) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, template)) return;
+
+  const rows = await db.prepare(`
+    SELECT s.*, e.full_name AS employee_name
+    FROM report_submissions s
+    JOIN employees e ON e.id = s.employee_id
+    WHERE s.template_id = ?
+    ORDER BY s.created_at DESC
+  `).all(req.params.id);
+  res.json(rows.map((r) => ({ ...r, data: JSON.parse(r.data_json) })));
+});
+
+app.get('/api/report-submissions/mine', requireLoggedIn, async (req, res) => {
+  const rows = await db.prepare(`
+    SELECT s.*, t.name AS template_name
+    FROM report_submissions s
+    JOIN report_templates t ON t.id = s.template_id
+    WHERE s.employee_id = ?
+    ORDER BY s.created_at DESC
+    LIMIT 100
+  `).all(req.session.employeeId);
+  res.json(rows.map((r) => ({ ...r, data: JSON.parse(r.data_json) })));
+});
+
+app.delete('/api/report-submissions/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM report_submissions WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  await db.prepare('DELETE FROM report_submissions WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+const REPORT_STATUS_LABELS = { pendiente: 'Pendiente', aprobado: 'Aprobado', rechazado: 'Rechazado' };
+
+// Arma el PDF a mano con pdfkit (no HTML-a-PDF) para poder controlar bien
+// el estilo y meter saltos de página propios antes de cada campo en vez
+// de dejar que corte cualquier bloque de texto a la mitad.
+function writeSubmissionPdf(res, { template, submission, employeeName }) {
+  const doc = new PDFDocument({ size: 'A4', margin: 56 });
+  doc.pipe(res);
+
+  const accent = '#0c8790';
+  const muted = '#5b7387';
+  const text = '#101c29';
+
+  doc.fillColor(accent).fontSize(20).text(template.name, { align: 'left' });
+  if (template.description) {
+    doc.moveDown(0.2);
+    doc.fillColor(muted).fontSize(10).text(template.description);
+  }
+  doc.moveDown(0.8);
+
+  doc.fillColor(muted).fontSize(9);
+  doc.text(`Departamento: ${DEPARTMENT_LABELS[submission.department] || submission.department}`);
+  doc.text(`Completado por: ${employeeName}`);
+  doc.text(`Fecha de envío: ${submission.created_at}`);
+  doc.text(`Estado: ${REPORT_STATUS_LABELS[submission.status] || submission.status}`);
+  if (submission.reviewed_by) {
+    doc.text(`Revisado por: ${submission.reviewed_by} (${submission.reviewed_at || ''})`);
+  }
+  if (submission.review_notes) {
+    doc.text(`Notas de revisión: ${submission.review_notes}`);
+  }
+
+  doc.moveDown(0.6);
+  doc.moveTo(doc.page.margins.left, doc.y)
+    .lineTo(doc.page.width - doc.page.margins.right, doc.y)
+    .strokeColor('#d8e0e6')
+    .stroke();
+  doc.moveDown(1);
+
+  const data = JSON.parse(submission.data_json);
+  const bottomLimit = doc.page.height - doc.page.margins.bottom;
+
+  for (const f of template.fields) {
+    // Salto de página propio antes de cada campo si ya no entra un bloque
+    // mínimo razonable, para no cortar una etiqueta sola al final de la hoja.
+    if (doc.y > bottomLimit - 60) doc.addPage();
+
+    doc.fillColor(accent).fontSize(9).font('Helvetica-Bold').text(f.label.toUpperCase());
+    doc.moveDown(0.15);
+    const value = data[f.key];
+    doc.fillColor(text).fontSize(11).font('Helvetica').text(value === undefined || value === null || value === '' ? '—' : String(value), {
+      width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+    });
+    doc.moveDown(0.7);
+  }
+
+  doc.end();
+}
+
+app.get('/api/report-submissions/:id/pdf', requireLoggedIn, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM report_submissions WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+
+  const isOwner = row.employee_id === req.session.employeeId;
+  const isDeptStaff = (req.session.isStaff || req.session.isSuperadmin)
+    && (req.session.isSuperadmin || req.session.department === row.department);
+  if (!isOwner && !isDeptStaff) return res.status(403).json({ error: 'No autorizado' });
+
+  const template = await db.prepare('SELECT * FROM report_templates WHERE id = ?').get(row.template_id);
+  if (!template) return res.status(404).json({ error: 'Plantilla no encontrada' });
+  const employee = await db.prepare('SELECT full_name FROM employees WHERE id = ?').get(row.employee_id);
+
+  const download = req.query.download === '1';
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename="informe-${row.id}.pdf"`);
+
+  writeSubmissionPdf(res, {
+    template: { ...template, fields: JSON.parse(template.fields_json) },
+    submission: row,
+    employeeName: employee ? employee.full_name : 'Empleado',
+  });
 });
 
 if (require.main === module) {
