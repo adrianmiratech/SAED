@@ -3127,11 +3127,11 @@ courseForm.addEventListener('submit', async (e) => {
 
     showToast(isEdit ? 'Curso actualizado.' : 'Curso creado.');
     await loadAcademyCourses();
-    if (isEdit) {
-      await openCourseModal(currentCourseId);
-    } else {
-      closeCourseModal();
-    }
+    // Al crear un curso nuevo, en vez de cerrar el modal lo dejamos abierto
+    // ya directamente en modo edición: ahí es donde vive "Materiales del
+    // curso" y "Clases programadas", así que si se cerraba de una el
+    // usuario no encontraba dónde subir el primer archivo.
+    await openCourseModal(isEdit ? currentCourseId : data.id);
   } catch (err) {
     courseMessage.className = 'message error';
     courseMessage.textContent = err.message;
