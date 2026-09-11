@@ -36,9 +36,16 @@ function requireSuperAdmin(req, res, next) {
   return res.status(403).json({ error: 'No autorizado' });
 }
 
-const VALID_STATUSES = ['pendiente', 'aprobado', 'rechazado'];
+const VALID_STATUSES = ['pendiente', 'en_revision', 'aprobado', 'rechazado'];
 const VALID_DEPARTMENTS = ['sams', 'safd'];
 const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
+const VALID_CASE_STATUSES = ['abierta', 'cerrada'];
+const VALID_MOVEMENT_TYPES = ['entrada', 'salida'];
+
+function csvEscape(value) {
+  const s = String(value ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
 
 // ---------- Auth ----------
 
@@ -266,6 +273,43 @@ app.get('/api/applications', requireAuth, async (req, res) => {
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = await db.prepare(`SELECT * FROM applications ${where} ORDER BY created_at DESC`).all(...params);
   res.json(rows);
+});
+
+// Tiene que ir antes de la ruta con :id para que Express no interprete
+// "export.csv" como un id de postulación.
+app.get('/api/applications/export.csv', requireAuth, async (req, res) => {
+  const { status, department } = req.query;
+  const scopedDept = req.session.adminDepartment;
+  const conditions = [];
+  const params = [];
+
+  if (status && VALID_STATUSES.includes(status)) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+  if (scopedDept) {
+    conditions.push('department = ?');
+    params.push(scopedDept);
+  } else if (department && VALID_DEPARTMENTS.includes(department)) {
+    conditions.push('department = ?');
+    params.push(department);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = await db.prepare(`SELECT * FROM applications ${where} ORDER BY created_at DESC`).all(...params);
+
+  const headers = ['ID', 'Departamento', 'Nombre', 'Edad', 'País', 'Discord', 'Estado', 'Fecha', 'Revisado por'];
+  const csvRows = [headers.join(',')];
+  for (const r of rows) {
+    csvRows.push([
+      r.id, DEPARTMENT_LABELS[r.department] || r.department, csvEscape(r.full_name), r.age,
+      csvEscape(r.country), csvEscape(r.discord_info), r.status, r.created_at, csvEscape(r.reviewed_by || ''),
+    ].join(','));
+  }
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="postulaciones.csv"');
+  res.send(`﻿${csvRows.join('\n')}`);
 });
 
 app.get('/api/applications/:id', requireAuth, async (req, res) => {
@@ -568,6 +612,319 @@ app.delete('/api/payroll/:id', requireAuth, async (req, res) => {
   if (!employee) return;
 
   await db.prepare('DELETE FROM payroll WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- Turnos ----------
+
+app.get('/api/shifts', requireAuth, async (req, res) => {
+  const { department, employeeId, from, to } = req.query;
+  const scopedDept = req.session.adminDepartment;
+  const conditions = [];
+  const params = [];
+
+  if (scopedDept) {
+    conditions.push('s.department = ?');
+    params.push(scopedDept);
+  } else if (department && VALID_DEPARTMENTS.includes(department)) {
+    conditions.push('s.department = ?');
+    params.push(department);
+  }
+  if (employeeId) {
+    conditions.push('s.employee_id = ?');
+    params.push(employeeId);
+  }
+  if (from) {
+    conditions.push('s.shift_date >= ?');
+    params.push(from);
+  }
+  if (to) {
+    conditions.push('s.shift_date <= ?');
+    params.push(to);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = await db.prepare(`
+    SELECT s.*, e.full_name AS employee_name
+    FROM shifts s
+    JOIN employees e ON e.id = s.employee_id
+    ${where}
+    ORDER BY s.shift_date ASC, s.start_time ASC
+  `).all(...params);
+  res.json(rows);
+});
+
+app.post('/api/shifts', requireAuth, async (req, res) => {
+  const { employeeId, shiftDate, startTime, endTime, notes } = req.body || {};
+  if (!employeeId || !shiftDate || !startTime || !endTime) {
+    return res.status(400).json({ error: 'Empleado, fecha y horario son requeridos' });
+  }
+
+  const employee = await getEmployeeWithAccess(req, res, employeeId);
+  if (!employee) return;
+
+  const info = await db.prepare(`
+    INSERT INTO shifts (employee_id, department, shift_date, start_time, end_time, notes, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(employee.id, employee.department, shiftDate, startTime, endTime, (notes || '').trim() || null, req.session.adminUser);
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+app.patch('/api/shifts/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrado' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  const { shiftDate, startTime, endTime, notes } = req.body || {};
+  await db.prepare(`
+    UPDATE shifts SET shift_date = ?, start_time = ?, end_time = ?, notes = ?
+    WHERE id = ?
+  `).run(
+    shiftDate || row.shift_date,
+    startTime || row.start_time,
+    endTime || row.end_time,
+    notes !== undefined ? ((notes || '').trim() || null) : row.notes,
+    req.params.id,
+  );
+
+  res.json({ ok: true });
+});
+
+app.delete('/api/shifts/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrado' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  await db.prepare('DELETE FROM shifts WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- Inventario ----------
+
+app.get('/api/inventory', requireAuth, async (req, res) => {
+  const { department } = req.query;
+  const scopedDept = req.session.adminDepartment;
+  const conditions = [];
+  const params = [];
+
+  if (scopedDept) {
+    conditions.push('department = ?');
+    params.push(scopedDept);
+  } else if (department && VALID_DEPARTMENTS.includes(department)) {
+    conditions.push('department = ?');
+    params.push(department);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = await db.prepare(`SELECT * FROM inventory_items ${where} ORDER BY name ASC`).all(...params);
+  res.json(rows);
+});
+
+app.post('/api/inventory', requireAuth, async (req, res) => {
+  const { name, category, unit } = req.body || {};
+  const scopedDept = req.session.adminDepartment;
+  const department = scopedDept || req.body?.department;
+
+  if (!name || !department) {
+    return res.status(400).json({ error: 'Nombre y departamento son requeridos' });
+  }
+  if (!VALID_DEPARTMENTS.includes(department)) {
+    return res.status(400).json({ error: 'Departamento inválido' });
+  }
+
+  const minQty = Number(req.body?.minQuantity) || 0;
+
+  const info = await db.prepare(`
+    INSERT INTO inventory_items (department, name, category, unit, quantity, min_quantity, created_by)
+    VALUES (?, ?, ?, ?, 0, ?, ?)
+  `).run(department, name.trim(), (category || '').trim() || null, (unit || 'unidad').trim(), minQty, req.session.adminUser);
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+async function getInventoryItemWithAccess(req, res, itemId) {
+  const item = await db.prepare('SELECT * FROM inventory_items WHERE id = ?').get(itemId);
+  if (!item) {
+    res.status(404).json({ error: 'Insumo no encontrado' });
+    return null;
+  }
+  if (!requireDepartmentAccess(req, res, item)) return null;
+  return item;
+}
+
+app.patch('/api/inventory/:id', requireAuth, async (req, res) => {
+  const item = await getInventoryItemWithAccess(req, res, req.params.id);
+  if (!item) return;
+
+  const { name, category, unit, minQuantity } = req.body || {};
+  await db.prepare(`
+    UPDATE inventory_items SET name = ?, category = ?, unit = ?, min_quantity = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    name !== undefined ? name.trim() : item.name,
+    category !== undefined ? ((category || '').trim() || null) : item.category,
+    unit !== undefined ? unit.trim() : item.unit,
+    minQuantity !== undefined ? Number(minQuantity) : item.min_quantity,
+    req.params.id,
+  );
+
+  res.json({ ok: true });
+});
+
+app.delete('/api/inventory/:id', requireAuth, async (req, res) => {
+  const item = await getInventoryItemWithAccess(req, res, req.params.id);
+  if (!item) return;
+
+  await db.prepare('DELETE FROM inventory_movements WHERE item_id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM inventory_items WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/inventory/:id/movements', requireAuth, async (req, res) => {
+  const item = await getInventoryItemWithAccess(req, res, req.params.id);
+  if (!item) return;
+
+  const rows = await db.prepare('SELECT * FROM inventory_movements WHERE item_id = ? ORDER BY created_at DESC').all(req.params.id);
+  res.json(rows);
+});
+
+app.post('/api/inventory/:id/movements', requireAuth, async (req, res) => {
+  const item = await getInventoryItemWithAccess(req, res, req.params.id);
+  if (!item) return;
+
+  const { type, quantity, reason } = req.body || {};
+  const qty = Number(quantity);
+  if (!VALID_MOVEMENT_TYPES.includes(type) || !Number.isFinite(qty) || qty <= 0) {
+    return res.status(400).json({ error: 'Tipo de movimiento y cantidad (mayor a 0) son requeridos' });
+  }
+
+  const newQuantity = type === 'entrada' ? item.quantity + qty : item.quantity - qty;
+  if (newQuantity < 0) {
+    return res.status(400).json({ error: 'No hay suficiente stock para esa salida' });
+  }
+
+  await db.prepare(`
+    INSERT INTO inventory_movements (item_id, type, quantity, reason, created_by)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(item.id, type, qty, (reason || '').trim() || null, req.session.adminUser);
+
+  await db.prepare(`UPDATE inventory_items SET quantity = ?, updated_at = datetime('now') WHERE id = ?`).run(newQuantity, item.id);
+
+  res.status(201).json({ ok: true, quantity: newQuantity });
+});
+
+// ---------- Atenciones (fichas clínicas / informes de intervención) ----------
+
+app.get('/api/cases', requireAuth, async (req, res) => {
+  const { department, status } = req.query;
+  const scopedDept = req.session.adminDepartment;
+  const conditions = [];
+  const params = [];
+
+  if (scopedDept) {
+    conditions.push('c.department = ?');
+    params.push(scopedDept);
+  } else if (department && VALID_DEPARTMENTS.includes(department)) {
+    conditions.push('c.department = ?');
+    params.push(department);
+  }
+  if (status && VALID_CASE_STATUSES.includes(status)) {
+    conditions.push('c.status = ?');
+    params.push(status);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = await db.prepare(`
+    SELECT c.*, e.full_name AS responsible_name
+    FROM cases c
+    LEFT JOIN employees e ON e.id = c.responsible_employee_id
+    ${where}
+    ORDER BY c.created_at DESC
+  `).all(...params);
+  res.json(rows);
+});
+
+app.post('/api/cases', requireAuth, async (req, res) => {
+  const { subjectName, age, location, summary, treatment, responsibleEmployeeId } = req.body || {};
+  const scopedDept = req.session.adminDepartment;
+  const department = scopedDept || req.body?.department;
+
+  if (!subjectName || !summary || !department) {
+    return res.status(400).json({ error: 'Nombre del sujeto, resumen y departamento son requeridos' });
+  }
+  if (!VALID_DEPARTMENTS.includes(department)) {
+    return res.status(400).json({ error: 'Departamento inválido' });
+  }
+
+  let responsibleId = null;
+  if (responsibleEmployeeId) {
+    const employee = await db.prepare('SELECT * FROM employees WHERE id = ?').get(responsibleEmployeeId);
+    if (!employee || employee.department !== department) {
+      return res.status(400).json({ error: 'Responsable inválido para ese departamento' });
+    }
+    responsibleId = employee.id;
+  }
+
+  const info = await db.prepare(`
+    INSERT INTO cases (department, subject_name, age, location, summary, treatment, responsible_employee_id, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    department, subjectName.trim(), age ? Number(age) : null, (location || '').trim() || null,
+    summary.trim(), (treatment || '').trim() || null, responsibleId, req.session.adminUser,
+  );
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+app.patch('/api/cases/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM cases WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  const { subjectName, age, location, summary, treatment, status, responsibleEmployeeId } = req.body || {};
+
+  if (status && !VALID_CASE_STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'Estado inválido' });
+  }
+
+  let responsibleId = row.responsible_employee_id;
+  if (responsibleEmployeeId !== undefined) {
+    if (responsibleEmployeeId) {
+      const employee = await db.prepare('SELECT * FROM employees WHERE id = ?').get(responsibleEmployeeId);
+      if (!employee || employee.department !== row.department) {
+        return res.status(400).json({ error: 'Responsable inválido para ese departamento' });
+      }
+      responsibleId = employee.id;
+    } else {
+      responsibleId = null;
+    }
+  }
+
+  await db.prepare(`
+    UPDATE cases
+    SET subject_name = ?, age = ?, location = ?, summary = ?, treatment = ?, status = ?, responsible_employee_id = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    subjectName !== undefined ? subjectName.trim() : row.subject_name,
+    age !== undefined ? (age ? Number(age) : null) : row.age,
+    location !== undefined ? ((location || '').trim() || null) : row.location,
+    summary !== undefined ? summary.trim() : row.summary,
+    treatment !== undefined ? ((treatment || '').trim() || null) : row.treatment,
+    status || row.status,
+    responsibleId,
+    req.params.id,
+  );
+
+  res.json({ ok: true });
+});
+
+app.delete('/api/cases/:id', requireAuth, async (req, res) => {
+  const row = await db.prepare('SELECT * FROM cases WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'No encontrada' });
+  if (!requireDepartmentAccess(req, res, row)) return;
+
+  await db.prepare('DELETE FROM cases WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 

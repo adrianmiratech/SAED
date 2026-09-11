@@ -3,141 +3,319 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Postulaciones SAED - Admin</title>
+  <title>SAED - Panel de Gestión</title>
   <link rel="icon" type="image/png" href="img/sams-logo.png" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <div class="topbar">
-    <div class="brand">
-      <span class="brand-mark">✚</span>
-      <span class="brand-text">
-        <span class="name">SAED</span>
-        <span class="tagline">Panel de Postulaciones</span>
-      </span>
-    </div>
-    <div class="top-actions">
-      <a href="/" class="muted-link">Ver sitio público</a>
-      <button id="manage-staff-btn" class="btn-ghost btn-sm" style="display:none">Gestionar staff</button>
-      <span class="top-divider"></span>
-      <div class="user-chip">
-        <span class="user-chip-avatar" id="whoami-avatar"></span>
-        <span class="user-chip-info">
-          <span class="user-chip-name" id="whoami"></span>
-          <span class="user-chip-scope" id="whoami-scope"></span>
-        </span>
-      </div>
-      <button id="logout-btn" class="btn-logout btn-sm">Cerrar sesión</button>
-    </div>
-  </div>
-
-  <div class="container wide">
-    <div class="toolbar" id="main-tabs">
-      <button class="btn tab-btn active" data-tab="postulaciones">Postulaciones</button>
-      <button class="btn tab-btn" data-tab="personal">Personal</button>
-    </div>
-
-    <div id="tab-postulaciones">
-    <div class="stats-grid" id="stats-grid">
-      <div class="stat-card">
-        <div class="stat-value" id="stat-total">–</div>
-        <div class="stat-label">Total</div>
-      </div>
-      <div class="stat-card stat-pendiente">
-        <div class="stat-value" id="stat-pendiente">–</div>
-        <div class="stat-label">Pendientes</div>
-      </div>
-      <div class="stat-card stat-aprobado">
-        <div class="stat-value" id="stat-aprobado">–</div>
-        <div class="stat-label">Aprobadas</div>
-      </div>
-      <div class="stat-card stat-rechazado">
-        <div class="stat-value" id="stat-rechazado">–</div>
-        <div class="stat-label">Rechazadas</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="toolbar" id="dept-filter-row">
-        <button class="btn dept-filter-btn active" data-department="">Todos los departamentos</button>
-        <button class="btn dept-filter-btn" data-department="sams">SAMS</button>
-        <button class="btn dept-filter-btn" data-department="safd">SAFD</button>
-      </div>
-      <div class="toolbar">
-        <button class="btn filter-btn active" data-status="">Todas</button>
-        <button class="btn filter-btn" data-status="pendiente">Pendientes</button>
-        <button class="btn filter-btn" data-status="aprobado">Aprobadas</button>
-        <button class="btn filter-btn" data-status="rechazado">Rechazadas</button>
-        <span style="flex:1"></span>
-        <input type="text" id="search-input" class="search-input" placeholder="Buscar por nombre o país..." />
-        <button id="refresh-btn" class="btn btn-ghost btn-sm">Actualizar</button>
-      </div>
-
-      <div id="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Departamento</th>
-              <th>Nombre</th>
-              <th>Edad</th>
-              <th>País</th>
-              <th>Estado</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="table-body"></tbody>
-        </table>
-        <div id="empty" class="empty-state" style="display:none">
-          <div class="empty-icon">📭</div>
-          <p>No hay postulaciones en esta categoría.</p>
-        </div>
-      </div>
-    </div>
-    </div>
-
-    <div id="tab-personal" style="display:none">
-      <div class="stats-grid" id="personal-stats-grid">
-        <div class="stat-card">
-          <div class="stat-value" id="pstat-total">–</div>
-          <div class="stat-label">Empleados</div>
-        </div>
-        <div class="stat-card stat-aprobado">
-          <div class="stat-value" id="pstat-active">–</div>
-          <div class="stat-label">Activos</div>
-        </div>
-        <div class="stat-card stat-rechazado">
-          <div class="stat-value" id="pstat-inactive">–</div>
-          <div class="stat-label">Inactivos</div>
-        </div>
-        <div class="stat-card stat-pendiente">
-          <div class="stat-value" id="pstat-pending">–</div>
-          <div class="stat-label">Nómina pendiente</div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <span class="brand-mark">✚</span>
+          <span class="brand-text">
+            <span class="name">SAED</span>
+            <span class="tagline">Gestión Sanitaria Integral</span>
+          </span>
         </div>
       </div>
 
-      <div class="card">
-        <div class="toolbar" id="personal-dept-filter-row">
-          <button class="btn personal-dept-filter-btn active" data-department="">Todos los departamentos</button>
-          <button class="btn personal-dept-filter-btn" data-department="sams">SAMS</button>
-          <button class="btn personal-dept-filter-btn" data-department="safd">SAFD</button>
+      <nav class="sidebar-nav" id="main-tabs">
+        <span class="sidebar-section-label">Reclutamiento</span>
+        <button class="sidebar-link tab-btn active" data-tab="postulaciones"><span class="sidebar-link-icon">📋</span> Postulaciones</button>
+
+        <span class="sidebar-section-label">Recursos humanos</span>
+        <button class="sidebar-link tab-btn" data-tab="personal"><span class="sidebar-link-icon">👥</span> Personal</button>
+        <button class="sidebar-link tab-btn" data-tab="turnos"><span class="sidebar-link-icon">🕒</span> Turnos</button>
+
+        <span class="sidebar-section-label">Operaciones sanitarias</span>
+        <button class="sidebar-link tab-btn" data-tab="inventario"><span class="sidebar-link-icon">💊</span> Inventario</button>
+        <button class="sidebar-link tab-btn" data-tab="atenciones"><span class="sidebar-link-icon">🩺</span> Atenciones</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <a href="/" class="muted-link">← Ver sitio público</a>
+      </div>
+    </aside>
+
+    <div class="main-area">
+      <div class="page-header">
+        <div class="page-header-title">
+          <h1 id="page-title">Postulaciones</h1>
+          <p id="page-subtitle">Revisá, filtrá y gestioná las postulaciones a SAMS y SAFD.</p>
         </div>
-        <div class="toolbar">
-          <button id="rates-btn" class="btn btn-ghost btn-sm" style="display:none">Configurar tarifas por rango</button>
-          <input type="text" id="personal-search-input" class="search-input" placeholder="Buscar por nombre, teléfono o Discord..." />
-          <span style="flex:1"></span>
-          <button id="new-employee-btn" class="btn-primary btn-sm">+ Nuevo empleado</button>
+        <div class="top-actions">
+          <button id="manage-staff-btn" class="btn-ghost btn-sm" style="display:none">Gestionar staff</button>
+          <span class="top-divider"></span>
+          <div class="user-chip">
+            <span class="user-chip-avatar" id="whoami-avatar"></span>
+            <span class="user-chip-info">
+              <span class="user-chip-name" id="whoami"></span>
+              <span class="user-chip-scope" id="whoami-scope"></span>
+            </span>
+          </div>
+          <button id="logout-btn" class="btn-logout btn-sm">Cerrar sesión</button>
+        </div>
+      </div>
+
+      <div class="content">
+
+        <div id="tab-postulaciones">
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="stat-total">–</div>
+            <div class="stat-label">Total</div>
+          </div>
+          <div class="stat-card stat-pendiente">
+            <div class="stat-value" id="stat-pendiente">–</div>
+            <div class="stat-label">Pendientes</div>
+          </div>
+          <div class="stat-card stat-aprobado">
+            <div class="stat-value" id="stat-aprobado">–</div>
+            <div class="stat-label">Aprobadas</div>
+          </div>
+          <div class="stat-card stat-rechazado">
+            <div class="stat-value" id="stat-rechazado">–</div>
+            <div class="stat-label">Rechazadas</div>
+          </div>
         </div>
 
-        <div id="employees-columns"></div>
-        <div id="employees-search-empty" class="empty-state" style="display:none">
-          <div class="empty-icon">🔍</div>
-          <p>No hay empleados que coincidan con la búsqueda.</p>
+        <div class="card">
+          <div class="toolbar" id="dept-filter-row">
+            <button class="btn dept-filter-btn active" data-department="">Todos los departamentos</button>
+            <button class="btn dept-filter-btn" data-department="sams">SAMS</button>
+            <button class="btn dept-filter-btn" data-department="safd">SAFD</button>
+          </div>
+          <div class="toolbar">
+            <button class="btn filter-btn active" data-status="">Todas</button>
+            <button class="btn filter-btn" data-status="pendiente">Pendientes</button>
+            <button class="btn filter-btn" data-status="en_revision">En revisión</button>
+            <button class="btn filter-btn" data-status="aprobado">Aprobadas</button>
+            <button class="btn filter-btn" data-status="rechazado">Rechazadas</button>
+            <span style="flex:1"></span>
+            <input type="text" id="search-input" class="search-input" placeholder="Buscar por nombre o país..." />
+            <button id="export-btn" class="btn btn-ghost btn-sm">Exportar CSV</button>
+            <button id="refresh-btn" class="btn btn-ghost btn-sm">Actualizar</button>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Departamento</th>
+                  <th>Nombre</th>
+                  <th>Edad</th>
+                  <th>País</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="table-body"></tbody>
+            </table>
+            <div id="empty" class="empty-state" style="display:none">
+              <div class="empty-icon">📭</div>
+              <p>No hay postulaciones en esta categoría.</p>
+            </div>
+          </div>
         </div>
-        <div id="employees-empty" class="empty-state" style="display:none">
-          <div class="empty-icon">👥</div>
-          <p>No hay empleados cargados en esta categoría.</p>
         </div>
+
+        <div id="tab-personal" style="display:none">
+          <div class="stats-grid" id="personal-stats-grid">
+            <div class="stat-card">
+              <div class="stat-value" id="pstat-total">–</div>
+              <div class="stat-label">Empleados</div>
+            </div>
+            <div class="stat-card stat-aprobado">
+              <div class="stat-value" id="pstat-active">–</div>
+              <div class="stat-label">Activos</div>
+            </div>
+            <div class="stat-card stat-rechazado">
+              <div class="stat-value" id="pstat-inactive">–</div>
+              <div class="stat-label">Inactivos</div>
+            </div>
+            <div class="stat-card stat-pendiente">
+              <div class="stat-value" id="pstat-pending">–</div>
+              <div class="stat-label">Nómina pendiente</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="toolbar" id="personal-dept-filter-row">
+              <button class="btn personal-dept-filter-btn active" data-department="">Todos los departamentos</button>
+              <button class="btn personal-dept-filter-btn" data-department="sams">SAMS</button>
+              <button class="btn personal-dept-filter-btn" data-department="safd">SAFD</button>
+            </div>
+            <div class="toolbar">
+              <button id="rates-btn" class="btn btn-ghost btn-sm" style="display:none">Configurar tarifas por rango</button>
+              <input type="text" id="personal-search-input" class="search-input" placeholder="Buscar por nombre, teléfono o Discord..." />
+              <span style="flex:1"></span>
+              <button id="new-employee-btn" class="btn-primary btn-sm">+ Nuevo empleado</button>
+            </div>
+
+            <div id="employees-columns"></div>
+            <div id="employees-search-empty" class="empty-state" style="display:none">
+              <div class="empty-icon">🔍</div>
+              <p>No hay empleados que coincidan con la búsqueda.</p>
+            </div>
+            <div id="employees-empty" class="empty-state" style="display:none">
+              <div class="empty-icon">👥</div>
+              <p>No hay empleados cargados en esta categoría.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-turnos" style="display:none">
+          <div class="stats-grid" id="shifts-stats-grid">
+            <div class="stat-card">
+              <div class="stat-value" id="sstat-total">–</div>
+              <div class="stat-label">Turnos totales</div>
+            </div>
+            <div class="stat-card stat-aprobado">
+              <div class="stat-value" id="sstat-today">–</div>
+              <div class="stat-label">Turnos hoy</div>
+            </div>
+            <div class="stat-card stat-pendiente">
+              <div class="stat-value" id="sstat-upcoming">–</div>
+              <div class="stat-label">Próximos 7 días</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="toolbar" id="shifts-dept-filter-row">
+              <button class="btn shifts-dept-filter-btn active" data-department="">Todos los departamentos</button>
+              <button class="btn shifts-dept-filter-btn" data-department="sams">SAMS</button>
+              <button class="btn shifts-dept-filter-btn" data-department="safd">SAFD</button>
+            </div>
+            <div class="toolbar">
+              <input type="text" id="shifts-search-input" class="search-input" placeholder="Buscar por empleado..." />
+              <span style="flex:1"></span>
+              <button id="new-shift-btn" class="btn-primary btn-sm">+ Nuevo turno</button>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Horario</th>
+                    <th>Empleado</th>
+                    <th>Departamento</th>
+                    <th>Notas</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="shifts-table-body"></tbody>
+              </table>
+              <div id="shifts-empty" class="empty-state" style="display:none">
+                <div class="empty-icon">🕒</div>
+                <p>No hay turnos cargados en esta categoría.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-inventario" style="display:none">
+          <div class="stats-grid" id="inventory-stats-grid">
+            <div class="stat-card">
+              <div class="stat-value" id="istat-total">–</div>
+              <div class="stat-label">Insumos registrados</div>
+            </div>
+            <div class="stat-card stat-rechazado">
+              <div class="stat-value" id="istat-low">–</div>
+              <div class="stat-label">Con stock bajo</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="toolbar" id="inventory-dept-filter-row">
+              <button class="btn inventory-dept-filter-btn active" data-department="">Todos los departamentos</button>
+              <button class="btn inventory-dept-filter-btn" data-department="sams">SAMS</button>
+              <button class="btn inventory-dept-filter-btn" data-department="safd">SAFD</button>
+            </div>
+            <div class="toolbar">
+              <input type="text" id="inventory-search-input" class="search-input" placeholder="Buscar insumo o categoría..." />
+              <span style="flex:1"></span>
+              <button id="new-inventory-btn" class="btn-primary btn-sm">+ Nuevo insumo</button>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Insumo</th>
+                    <th>Categoría</th>
+                    <th>Departamento</th>
+                    <th>Stock</th>
+                    <th>Mínimo</th>
+                    <th>Estado</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="inventory-table-body"></tbody>
+              </table>
+              <div id="inventory-empty" class="empty-state" style="display:none">
+                <div class="empty-icon">💊</div>
+                <p>No hay insumos cargados en esta categoría.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-atenciones" style="display:none">
+          <div class="stats-grid" id="cases-stats-grid">
+            <div class="stat-card">
+              <div class="stat-value" id="cstat-total">–</div>
+              <div class="stat-label">Atenciones</div>
+            </div>
+            <div class="stat-card stat-pendiente">
+              <div class="stat-value" id="cstat-open">–</div>
+              <div class="stat-label">Abiertas</div>
+            </div>
+            <div class="stat-card stat-aprobado">
+              <div class="stat-value" id="cstat-closed">–</div>
+              <div class="stat-label">Cerradas</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="toolbar" id="cases-dept-filter-row">
+              <button class="btn cases-dept-filter-btn active" data-department="">Todos los departamentos</button>
+              <button class="btn cases-dept-filter-btn" data-department="sams">SAMS</button>
+              <button class="btn cases-dept-filter-btn" data-department="safd">SAFD</button>
+            </div>
+            <div class="toolbar">
+              <button class="btn cases-status-filter-btn active" data-status="">Todas</button>
+              <button class="btn cases-status-filter-btn" data-status="abierta">Abiertas</button>
+              <button class="btn cases-status-filter-btn" data-status="cerrada">Cerradas</button>
+              <span style="flex:1"></span>
+              <input type="text" id="cases-search-input" class="search-input" placeholder="Buscar por nombre..." />
+              <button id="new-case-btn" class="btn-primary btn-sm">+ Nueva atención</button>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Departamento</th>
+                    <th>Sujeto</th>
+                    <th>Responsable</th>
+                    <th>Estado</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="cases-table-body"></tbody>
+              </table>
+              <div id="cases-empty" class="empty-state" style="display:none">
+                <div class="empty-icon">🩺</div>
+                <p>No hay atenciones cargadas en esta categoría.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -275,6 +453,7 @@
 
       <div class="modal-actions">
         <button class="btn btn-danger" data-action="rechazado">Rechazar</button>
+        <button class="btn btn-info" data-action="en_revision">En revisión</button>
         <button class="btn btn-ghost" data-action="pendiente">Marcar pendiente</button>
         <button class="btn btn-ok" data-action="aprobado">Aprobar</button>
       </div>
@@ -323,6 +502,195 @@
 
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="staff-modal-close">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="shift-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="shift-modal-title">Nuevo turno</h2>
+          <p class="subtitle">Asigná un turno de guardia a un integrante del personal.</p>
+        </div>
+      </div>
+
+      <form id="shift-form">
+        <label for="shift-employee">Empleado</label>
+        <select id="shift-employee" required></select>
+
+        <label for="shift-date">Fecha</label>
+        <input type="date" id="shift-date" required />
+
+        <div class="row">
+          <div>
+            <label for="shift-start">Hora de inicio</label>
+            <input type="time" id="shift-start" required />
+          </div>
+          <div>
+            <label for="shift-end">Hora de fin</label>
+            <input type="time" id="shift-end" required />
+          </div>
+        </div>
+
+        <label for="shift-notes">Notas <span class="hint">(opcional)</span></label>
+        <textarea id="shift-notes" placeholder="Ej: Cobertura zona norte"></textarea>
+
+        <div class="submit-row">
+          <button type="submit" class="btn-primary" id="shift-form-submit">Crear turno</button>
+        </div>
+        <div id="shift-message" class="message"></div>
+      </form>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="shift-modal-close">Cerrar</button>
+        <button class="btn btn-danger btn-sm" id="shift-delete-btn" style="display:none">Eliminar turno</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="inventory-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="inventory-modal-title">Nuevo insumo</h2>
+          <p class="subtitle" id="inventory-modal-sub"></p>
+        </div>
+        <div class="modal-header-badges" id="inventory-modal-status"></div>
+      </div>
+
+      <form id="inventory-form">
+        <div class="row">
+          <div>
+            <label for="inventory-name">Nombre</label>
+            <input type="text" id="inventory-name" required />
+          </div>
+          <div>
+            <label for="inventory-category">Categoría <span class="hint">(opcional)</span></label>
+            <input type="text" id="inventory-category" placeholder="Ej: Medicamentos" />
+          </div>
+        </div>
+
+        <div id="inventory-department-field">
+          <label for="inventory-department">Departamento</label>
+          <select id="inventory-department">
+            <option value="sams">SAMS</option>
+            <option value="safd">SAFD</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="inventory-unit">Unidad</label>
+            <input type="text" id="inventory-unit" value="unidad" />
+          </div>
+          <div>
+            <label for="inventory-min">Stock mínimo</label>
+            <input type="number" id="inventory-min" min="0" step="1" value="0" />
+          </div>
+        </div>
+
+        <div class="submit-row">
+          <button type="submit" class="btn-primary" id="inventory-form-submit">Crear insumo</button>
+        </div>
+        <div id="inventory-message" class="message"></div>
+      </form>
+
+      <div id="inventory-movements-section" style="display:none">
+        <h3 class="modal-section-title">Registrar movimiento de stock</h3>
+        <div class="row">
+          <div>
+            <label for="movement-type">Tipo</label>
+            <select id="movement-type">
+              <option value="entrada">Entrada</option>
+              <option value="salida">Salida</option>
+            </select>
+          </div>
+          <div>
+            <label for="movement-quantity">Cantidad</label>
+            <input type="number" id="movement-quantity" min="0" step="1" />
+          </div>
+        </div>
+        <label for="movement-reason">Motivo <span class="hint">(opcional)</span></label>
+        <input type="text" id="movement-reason" placeholder="Ej: Uso en atención" />
+        <div class="submit-row">
+          <button type="button" id="movement-add-btn" class="btn-primary btn-sm">Registrar</button>
+        </div>
+        <div id="movement-message" class="message"></div>
+
+        <h3 class="modal-section-title">Historial de movimientos</h3>
+        <div id="movements-list" class="staff-list"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="inventory-modal-close">Cerrar</button>
+        <button class="btn btn-danger btn-sm" id="inventory-delete-btn" style="display:none">Eliminar insumo</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="case-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="case-modal-title">Nueva atención</h2>
+          <p class="subtitle" id="case-modal-sub"></p>
+        </div>
+        <div class="modal-header-badges">
+          <span id="case-modal-department"></span>
+          <span id="case-modal-status"></span>
+        </div>
+      </div>
+
+      <form id="case-form">
+        <div id="case-department-field">
+          <label for="case-department">Departamento</label>
+          <select id="case-department">
+            <option value="sams">SAMS</option>
+            <option value="safd">SAFD</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="case-subject" id="case-subject-label">Paciente</label>
+            <input type="text" id="case-subject" required />
+          </div>
+          <div>
+            <label for="case-age">Edad <span class="hint">(opcional)</span></label>
+            <input type="number" id="case-age" min="0" />
+          </div>
+        </div>
+
+        <label for="case-location">Ubicación <span class="hint">(opcional)</span></label>
+        <input type="text" id="case-location" placeholder="Ej: Hospital Central, Sandy Shores" />
+
+        <label for="case-summary" id="case-summary-label">Diagnóstico / motivo</label>
+        <textarea id="case-summary" required placeholder="Describí el motivo de la atención o el diagnóstico"></textarea>
+
+        <label for="case-treatment" id="case-treatment-label">Tratamiento aplicado <span class="hint">(opcional)</span></label>
+        <textarea id="case-treatment"></textarea>
+
+        <label for="case-responsible">Responsable <span class="hint">(opcional)</span></label>
+        <select id="case-responsible"><option value="">Sin asignar</option></select>
+
+        <div id="case-status-field" style="display:none">
+          <label for="case-status">Estado</label>
+          <select id="case-status">
+            <option value="abierta">Abierta</option>
+            <option value="cerrada">Cerrada</option>
+          </select>
+        </div>
+
+        <div class="submit-row">
+          <button type="submit" class="btn-primary" id="case-form-submit">Crear atención</button>
+        </div>
+        <div id="case-message" class="message"></div>
+      </form>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="case-modal-close">Cerrar</button>
+        <button class="btn btn-danger btn-sm" id="case-delete-btn" style="display:none">Eliminar atención</button>
       </div>
     </div>
   </div>

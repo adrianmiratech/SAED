@@ -1,14 +1,20 @@
-# SAED - Gestión de Postulaciones
+# SAED - Gestión Sanitaria y de Emergencias Integral
 
-Web para gestionar las postulaciones a los departamentos de emergencia de San Andreas, coordinados por el SAED
+Sistema de gestión para los departamentos de emergencia de San Andreas, coordinados por el SAED
 (San Andreas Emergency Departments): **SAMS** (San Andreas Medical Services) y **SAFD** (San Andreas Fire Department).
 
 - `/` — formulario público de postulación, con selección de departamento (SAMS o SAFD).
 - `/login.html` — login del staff.
-- `/admin.html` — panel para ver, filtrar (por departamento y por estado), aprobar/rechazar y anotar postulaciones (requiere login).
+- `/admin.html` — panel de gestión (requiere login), organizado en módulos:
+  - **Postulaciones**: ver, filtrar (por departamento y estado), aprobar/rechazar/marcar en revisión, anotar y exportar a CSV.
+  - **Personal**: roster de empleados por rango (tablero Kanban), tarifas por hora y nómina.
+  - **Turnos**: asignación y control de horarios de guardia del personal.
+  - **Inventario**: stock de insumos y medicamentos por departamento, con umbral de stock mínimo y registro de movimientos (entradas/salidas).
+  - **Atenciones**: fichas de pacientes atendidos por SAMS e informes de intervención de SAFD, con responsable y estado (abierta/cerrada).
 
-Cada postulación se guarda en una base de datos local (SQLite) junto con el departamento elegido, y además se sigue
-enviando como embed al webhook de Discord configurado.
+Cada postulación se guarda en una base de datos (Turso/SQLite) junto con el departamento elegido, y además se sigue
+enviando como embed al webhook de Discord configurado. Al aprobar una postulación, la persona pasa automáticamente
+al roster de Personal con el rango asignado.
 
 ## Instalación
 

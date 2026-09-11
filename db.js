@@ -111,6 +111,56 @@ async function setup() {
       created_by TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS shifts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER NOT NULL REFERENCES employees(id),
+      department TEXT NOT NULL,
+      shift_date TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL,
+      notes TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS inventory_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      department TEXT NOT NULL,
+      name TEXT NOT NULL,
+      category TEXT,
+      unit TEXT NOT NULL DEFAULT 'unidad',
+      quantity REAL NOT NULL DEFAULT 0,
+      min_quantity REAL NOT NULL DEFAULT 0,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL REFERENCES inventory_items(id),
+      type TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      reason TEXT,
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS cases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      department TEXT NOT NULL,
+      subject_name TEXT NOT NULL,
+      age INTEGER,
+      location TEXT,
+      summary TEXT NOT NULL,
+      treatment TEXT,
+      status TEXT NOT NULL DEFAULT 'abierta',
+      responsible_employee_id INTEGER REFERENCES employees(id),
+      created_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT
+    );
   `);
 
   // Siembra los rangos oficiales del SAED si la tabla está vacía. Los
