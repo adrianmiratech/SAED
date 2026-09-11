@@ -575,7 +575,10 @@ button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); out
 .attendance-dept-filter-btn,
 .inventory-dept-filter-btn,
 .cases-dept-filter-btn,
-.cases-status-filter-btn {
+.cases-status-filter-btn,
+.academia-dept-filter-btn,
+.academia-status-filter-btn,
+.academia-subtab-btn {
   background: var(--panel-alt);
   border: 1px solid var(--border);
   color: var(--text-muted);
@@ -586,7 +589,10 @@ button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); out
 .attendance-dept-filter-btn.active,
 .inventory-dept-filter-btn.active,
 .cases-dept-filter-btn.active,
-.cases-status-filter-btn.active {
+.cases-status-filter-btn.active,
+.academia-dept-filter-btn.active,
+.academia-status-filter-btn.active,
+.academia-subtab-btn.active {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
@@ -780,6 +786,7 @@ tr:hover td { background: var(--panel-alt); }
 .status-en_revision { background: var(--info-bg); color: var(--info); }
 .status-aprobado { background: var(--ok-bg); color: var(--ok); }
 .status-rechazado { background: var(--danger-bg); color: var(--danger); }
+.status-baja { background: var(--panel-alt); color: var(--text-muted); }
 
 .row-link { cursor: pointer; }
 

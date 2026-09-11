@@ -6,6 +6,7 @@ let currentId = null;
 let scopedDepartment = null;
 let currentUsername = null;
 let hasHrAccess = false;
+let hasAcademyAccess = false;
 let isStaff = false;
 let isSuperadmin = false;
 
@@ -29,7 +30,10 @@ const PAGE_TITLES = {
   fichajes: ['Fichajes', 'Control de entrada y salida del personal.'],
   inventario: ['Inventario', 'Stock de insumos y medicamentos de SAMS y SAFD.'],
   atenciones: ['Atenciones', 'Fichas de pacientes e informes de intervención.'],
+  academia: ['Academia', 'Cadetes, cursos y evaluaciones de la formación del SAED.'],
 };
+const CADET_STATUS_LABELS = { activo: 'Activo', graduado: 'Graduado', expulsado: 'Expulsado', baja: 'Baja' };
+const CADET_STATUS_PILL_CLASS = { activo: 'status-en_revision', graduado: 'status-aprobado', expulsado: 'status-rechazado', baja: 'status-baja' };
 
 const tableBody = document.getElementById('table-body');
 const emptyEl = document.getElementById('empty');
@@ -73,6 +77,7 @@ async function checkSession() {
   isStaff = !!data.isStaff;
   isSuperadmin = !!data.isSuperadmin;
   hasHrAccess = !!data.hrAccess;
+  hasAcademyAccess = !!data.academyAccess;
   // null = ve todo (superadmin); si no, el empleado queda atado a su
   // propio departamento en todos los filtros del panel.
   scopedDepartment = isSuperadmin ? null : data.department;
@@ -102,6 +107,9 @@ async function checkSession() {
 
     document.getElementById('cases-dept-filter-row').style.display = 'none';
     currentCasesDeptFilter = scopedDepartment;
+
+    document.getElementById('academia-dept-filter-row').style.display = 'none';
+    currentCadetsDeptFilter = scopedDepartment;
   }
   if (isSuperadmin) {
     // Solo el superadmin define tarifas de pago por rango y administra roles.
@@ -123,6 +131,12 @@ async function checkSession() {
   document.getElementById('nav-section-rrhh').style.display = (canManageNow || canViewAttendance) ? '' : 'none';
   document.getElementById('fichajes-nav-btn').style.display = canViewAttendance ? '' : 'none';
   manageTemplatesBtn.style.display = canManageNow ? 'inline-flex' : 'none';
+
+  // La Academia la administra la división RTD (o el superadmin); no es
+  // parte del grupo general de módulos de staff.
+  const canManageAcademy = isSuperadmin || hasAcademyAccess;
+  document.getElementById('nav-academia-btn').style.display = canManageAcademy ? '' : 'none';
+  if (canManageAcademy) document.getElementById('nav-section-reclutamiento').style.display = '';
 
   switchTab(canManageNow ? 'postulaciones' : 'fichaje');
 }
@@ -380,7 +394,7 @@ document.getElementById('export-btn').addEventListener('click', () => {
 
 // ---------- Navegación entre módulos (sidebar) ----------
 
-const TAB_IDS = ['fichaje', 'informes', 'postulaciones', 'personal', 'fichajes', 'inventario', 'atenciones'];
+const TAB_IDS = ['fichaje', 'informes', 'postulaciones', 'academia', 'personal', 'fichajes', 'inventario', 'atenciones'];
 
 async function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
@@ -414,6 +428,10 @@ async function switchTab(tab) {
   } else if (tab === 'atenciones') {
     if (employees.length === 0) await loadEmployees();
     loadCases();
+  } else if (tab === 'academia') {
+    if (employees.length === 0) await loadEmployees();
+    if (academyCourses.length === 0) await loadAcademyCourses();
+    loadCadets();
   }
 }
 
@@ -1668,6 +1686,8 @@ document.addEventListener('keydown', (e) => {
   if (templatesModalBackdrop.classList.contains('open')) closeTemplatesModal();
   if (fillReportModalBackdrop.classList.contains('open')) closeFillReportModal();
   if (submissionsModalBackdrop.classList.contains('open')) submissionsModalBackdrop.classList.remove('open');
+  if (cadetModalBackdrop.classList.contains('open')) closeCadetModal();
+  if (courseModalBackdrop.classList.contains('open')) closeCourseModal();
 });
 
 // ---------- Fichajes (vista de RRHH / Dirección) ----------
@@ -2472,6 +2492,660 @@ document.querySelectorAll('.cases-status-filter-btn').forEach((btn) => {
     currentCasesStatusFilter = btn.dataset.status;
     loadCases();
   });
+});
+
+// ---------- Academia (cadetes, cursos y evaluaciones, a cargo de RTD) ----------
+
+let cadets = [];
+let academyCourses = [];
+let currentCadetsDeptFilter = '';
+let currentCadetsStatusFilter = '';
+let currentCadetsSearch = '';
+let currentCadetId = null;
+let currentCourseId = null;
+
+const cadetsListEl = document.getElementById('cadets-list');
+const cadetsEmptyEl = document.getElementById('cadets-empty');
+const cadetModalBackdrop = document.getElementById('cadet-modal-backdrop');
+const cadetForm = document.getElementById('cadet-form');
+const cadetMessage = document.getElementById('cadet-message');
+const cadetDepartmentField = document.getElementById('cadet-department-field');
+const cadetDepartmentSelect = document.getElementById('cadet-department');
+const cadetStatusField = document.getElementById('cadet-status-field');
+const cadetStatusSelect = document.getElementById('cadet-status');
+const cadetFormSubmit = document.getElementById('cadet-form-submit');
+const cadetDeleteBtn = document.getElementById('cadet-delete-btn');
+const cadetGraduateSection = document.getElementById('cadet-graduate-section');
+const cadetEvaluationsSection = document.getElementById('cadet-evaluations-section');
+const cadetNotesSection = document.getElementById('cadet-notes-section');
+const evaluationsListEl = document.getElementById('evaluations-list');
+const cadetNotesListEl = document.getElementById('cadet-notes-list');
+const coursesListEl = document.getElementById('courses-list');
+const coursesEmptyEl = document.getElementById('courses-empty');
+const courseModalBackdrop = document.getElementById('course-modal-backdrop');
+const courseForm = document.getElementById('course-form');
+const courseMessage = document.getElementById('course-message');
+const courseDepartmentField = document.getElementById('course-department-field');
+const courseFormSubmit = document.getElementById('course-form-submit');
+const courseDeleteBtn = document.getElementById('course-delete-btn');
+const courseActiveField = document.getElementById('course-active-field');
+const courseClassesSection = document.getElementById('course-classes-section');
+const classesListEl = document.getElementById('classes-list');
+
+document.querySelectorAll('.academia-subtab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.academia-subtab-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    const isCadetes = btn.dataset.subtab === 'cadetes';
+    document.getElementById('academia-cadetes-panel').style.display = isCadetes ? 'block' : 'none';
+    document.getElementById('academia-cursos-panel').style.display = isCadetes ? 'none' : 'block';
+    if (!isCadetes && academyCourses.length === 0) loadAcademyCourses();
+  });
+});
+
+async function loadCadets() {
+  const params = new URLSearchParams();
+  if (currentCadetsDeptFilter) params.set('department', currentCadetsDeptFilter);
+  if (currentCadetsStatusFilter) params.set('status', currentCadetsStatusFilter);
+  const query = params.toString();
+  const res = await fetch(query ? `/api/cadets?${query}` : '/api/cadets');
+  if (res.status === 401) { window.location.href = '/login.html'; return; }
+  cadets = await res.json();
+  renderAcademyStats();
+  renderCadetsList();
+}
+
+function renderAcademyStats() {
+  document.getElementById('acstat-total').textContent = cadets.length;
+  document.getElementById('acstat-activos').textContent = cadets.filter((c) => c.status === 'activo').length;
+  document.getElementById('acstat-graduados').textContent = cadets.filter((c) => c.status === 'graduado').length;
+}
+
+function cadetStatusPill(status) {
+  return `<span class="status-pill ${CADET_STATUS_PILL_CLASS[status] || 'status-pendiente'}">${CADET_STATUS_LABELS[status] || status}</span>`;
+}
+
+function getFilteredCadets() {
+  if (!currentCadetsSearch) return cadets;
+  const term = currentCadetsSearch.toLowerCase();
+  return cadets.filter((c) => c.full_name.toLowerCase().includes(term));
+}
+
+function renderCadetsList() {
+  const rows = getFilteredCadets();
+  if (rows.length === 0) {
+    cadetsListEl.innerHTML = '';
+    cadetsEmptyEl.style.display = 'block';
+    return;
+  }
+  cadetsEmptyEl.style.display = 'none';
+  cadetsListEl.innerHTML = rows.map((c) => `
+    <div class="staff-row row-link" data-cadet-id="${c.id}">
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(c.full_name)}</span>
+        <span class="dept-badge dept-${c.department}">${departmentLabel(c.department)}</span>
+        ${cadetStatusPill(c.status)}
+        ${c.employee_name ? `<span class="muted-link">Empleado: ${escapeHtml(c.employee_name)}</span>` : ''}
+      </div>
+      <span class="muted-link">Ingresó el ${formatDate(c.created_at)}</span>
+    </div>
+  `).join('');
+
+  cadetsListEl.querySelectorAll('[data-cadet-id]').forEach((row) => {
+    row.addEventListener('click', () => openCadetModal(Number(row.dataset.cadetId)));
+  });
+}
+
+function resetCadetForm() {
+  cadetForm.reset();
+  cadetMessage.className = 'message';
+  cadetMessage.textContent = '';
+}
+
+function openNewCadetModal() {
+  currentCadetId = null;
+  resetCadetForm();
+
+  document.getElementById('cadet-modal-name').textContent = 'Nuevo cadete';
+  document.getElementById('cadet-modal-sub').textContent = 'Registrar un nuevo ingreso a la academia.';
+  document.getElementById('cadet-modal-department').innerHTML = '';
+  document.getElementById('cadet-modal-status').innerHTML = '';
+  cadetFormSubmit.textContent = 'Registrar cadete';
+  cadetDeleteBtn.style.display = 'none';
+  cadetStatusField.style.display = 'none';
+  cadetGraduateSection.style.display = 'none';
+  cadetEvaluationsSection.style.display = 'none';
+  cadetNotesSection.style.display = 'none';
+  cadetDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
+  cadetDepartmentSelect.value = scopedDepartment || currentCadetsDeptFilter || 'sams';
+
+  cadetModalBackdrop.classList.add('open');
+}
+
+async function openCadetModal(id) {
+  const c = cadets.find((x) => x.id === id);
+  if (!c) return;
+  currentCadetId = id;
+  resetCadetForm();
+
+  document.getElementById('cadet-modal-name').textContent = c.full_name;
+  document.getElementById('cadet-modal-sub').textContent = `Ingresó el ${formatDate(c.created_at)}`;
+  document.getElementById('cadet-modal-department').innerHTML = `<span class="dept-badge dept-${c.department}">${departmentLabel(c.department)}</span>`;
+  document.getElementById('cadet-modal-status').innerHTML = cadetStatusPill(c.status);
+  cadetFormSubmit.textContent = 'Guardar cambios';
+  cadetDeleteBtn.style.display = 'inline-flex';
+  cadetStatusField.style.display = 'block';
+  cadetDepartmentField.style.display = 'none';
+  cadetEvaluationsSection.style.display = 'block';
+  cadetNotesSection.style.display = 'block';
+
+  document.getElementById('cadet-fullname').value = c.full_name;
+  document.getElementById('cadet-phone').value = c.phone || '';
+  document.getElementById('cadet-discord').value = c.discord_info || '';
+  document.getElementById('cadet-notes').value = c.notes || '';
+  cadetStatusSelect.value = c.status;
+
+  cadetGraduateSection.style.display = 'block';
+  document.getElementById('cadet-graduate-message').className = 'message';
+  document.getElementById('cadet-graduate-message').textContent = '';
+  const graduateBtn = document.getElementById('cadet-graduate-btn');
+  if (c.employee_id) {
+    document.getElementById('cadet-graduate-status').textContent = `Ya tiene una cuenta de empleado vinculada: ${c.employee_name || ''}.`;
+    graduateBtn.style.display = 'none';
+  } else {
+    document.getElementById('cadet-graduate-status').textContent = 'Al graduarlo se crea automáticamente su cuenta de empleado con el rango de entrada del departamento.';
+    graduateBtn.style.display = 'inline-flex';
+  }
+
+  populateEvaluationCourseSelect(c.department);
+  evaluationsListEl.innerHTML = '<div class="staff-empty">Cargando…</div>';
+  cadetNotesListEl.innerHTML = '<div class="staff-empty">Cargando…</div>';
+
+  cadetModalBackdrop.classList.add('open');
+
+  await Promise.all([loadEvaluations(id), loadCadetNotes(id)]);
+}
+
+function closeCadetModal() {
+  cadetModalBackdrop.classList.remove('open');
+  currentCadetId = null;
+}
+
+cadetForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  cadetMessage.className = 'message';
+  cadetMessage.textContent = '';
+
+  const isEdit = !!currentCadetId;
+  const body = {
+    fullName: document.getElementById('cadet-fullname').value.trim(),
+    phone: document.getElementById('cadet-phone').value.trim(),
+    discordInfo: document.getElementById('cadet-discord').value.trim(),
+    notes: document.getElementById('cadet-notes').value.trim(),
+  };
+  if (!isEdit) {
+    body.department = scopedDepartment || cadetDepartmentSelect.value;
+  } else {
+    body.status = cadetStatusSelect.value;
+  }
+
+  const submitBtn = cadetFormSubmit;
+  submitBtn.disabled = true;
+  try {
+    const url = isEdit ? `/api/cadets/${currentCadetId}` : '/api/cadets';
+    const method = isEdit ? 'PATCH' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el cadete');
+
+    showToast(isEdit ? 'Cadete actualizado.' : 'Cadete registrado.');
+    await loadCadets();
+    if (isEdit) {
+      await openCadetModal(currentCadetId);
+    } else {
+      closeCadetModal();
+    }
+  } catch (err) {
+    cadetMessage.className = 'message error';
+    cadetMessage.textContent = err.message;
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+document.getElementById('cadet-graduate-btn').addEventListener('click', async () => {
+  if (!currentCadetId) return;
+  const msg = document.getElementById('cadet-graduate-message');
+  msg.className = 'message';
+  msg.textContent = '';
+  try {
+    const res = await fetch(`/api/cadets/${currentCadetId}/graduate`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo graduar al cadete');
+
+    showToast('Cadete graduado. Se creó su cuenta de empleado.');
+    await loadCadets();
+    await openCadetModal(currentCadetId);
+  } catch (err) {
+    msg.className = 'message error';
+    msg.textContent = err.message;
+  }
+});
+
+cadetDeleteBtn.addEventListener('click', async () => {
+  if (!currentCadetId) return;
+  if (!confirm('¿Eliminar este cadete y todo su historial de formación?')) return;
+  await fetch(`/api/cadets/${currentCadetId}`, { method: 'DELETE' });
+  closeCadetModal();
+  await loadCadets();
+  showToast('Cadete eliminado.', 'danger');
+});
+
+document.getElementById('new-cadet-btn').addEventListener('click', openNewCadetModal);
+document.getElementById('cadet-modal-close').addEventListener('click', closeCadetModal);
+cadetModalBackdrop.addEventListener('click', (e) => {
+  if (e.target === cadetModalBackdrop) closeCadetModal();
+});
+
+document.getElementById('cadets-search-input').addEventListener('input', (e) => {
+  currentCadetsSearch = e.target.value.trim();
+  renderCadetsList();
+});
+
+document.querySelectorAll('.academia-dept-filter-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.academia-dept-filter-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentCadetsDeptFilter = btn.dataset.department;
+    loadCadets();
+  });
+});
+
+document.querySelectorAll('.academia-status-filter-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.academia-status-filter-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentCadetsStatusFilter = btn.dataset.status;
+    loadCadets();
+  });
+});
+
+// ---- Evaluaciones ----
+
+function populateEvaluationCourseSelect(department) {
+  const select = document.getElementById('evaluation-course');
+  const list = academyCourses.filter((c) => !c.department || c.department === department);
+  select.innerHTML = '<option value="">Sin curso asociado</option>' + list.map((c) => (
+    `<option value="${c.id}">${escapeHtml(c.name)}</option>`
+  )).join('');
+}
+
+async function loadEvaluations(cadetId) {
+  const res = await fetch(`/api/cadets/${cadetId}/evaluations`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  renderEvaluations(rows);
+}
+
+function renderEvaluations(rows) {
+  if (rows.length === 0) {
+    evaluationsListEl.innerHTML = '<div class="staff-empty">Todavía no hay evaluaciones registradas.</div>';
+    return;
+  }
+  evaluationsListEl.innerHTML = rows.map((ev) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(ev.title)}</span>
+        ${ev.course_name ? `<span class="muted-link">${escapeHtml(ev.course_name)}</span>` : ''}
+        ${ev.score !== null && ev.score !== undefined ? `<span class="status-pill status-pendiente">${ev.score}/${ev.max_score}</span>` : ''}
+        ${ev.passed === 1 ? '<span class="status-pill status-aprobado">Aprobado</span>' : ev.passed === 0 ? '<span class="status-pill status-rechazado">Reprobado</span>' : ''}
+        <span class="muted-link">${formatDate(ev.created_at)}</span>
+      </div>
+      <button class="btn btn-danger btn-sm" data-delete-evaluation="${ev.id}">Eliminar</button>
+    </div>
+  `).join('');
+
+  evaluationsListEl.querySelectorAll('[data-delete-evaluation]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta evaluación?')) return;
+      await fetch(`/api/academy-evaluations/${btn.dataset.deleteEvaluation}`, { method: 'DELETE' });
+      await loadEvaluations(currentCadetId);
+      showToast('Evaluación eliminada.', 'danger');
+    });
+  });
+}
+
+document.getElementById('evaluation-add-btn').addEventListener('click', async () => {
+  if (!currentCadetId) return;
+  const msg = document.getElementById('evaluation-message');
+  msg.className = 'message';
+  msg.textContent = '';
+
+  const title = document.getElementById('evaluation-title').value.trim();
+  const courseId = document.getElementById('evaluation-course').value || undefined;
+  const score = document.getElementById('evaluation-score').value;
+  const maxScore = document.getElementById('evaluation-max-score').value;
+  const passedRaw = document.getElementById('evaluation-passed').value;
+  const notes = document.getElementById('evaluation-notes').value.trim();
+
+  if (!title) {
+    msg.className = 'message error';
+    msg.textContent = 'Ponele un título a la evaluación.';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cadets/${currentCadetId}/evaluations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title, courseId, score: score || undefined, maxScore: maxScore || undefined,
+        passed: passedRaw === '' ? undefined : passedRaw === '1', notes,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo registrar la evaluación');
+
+    document.getElementById('evaluation-title').value = '';
+    document.getElementById('evaluation-score').value = '';
+    document.getElementById('evaluation-notes').value = '';
+    document.getElementById('evaluation-passed').value = '';
+    await loadEvaluations(currentCadetId);
+    showToast('Evaluación registrada.');
+  } catch (err) {
+    msg.className = 'message error';
+    msg.textContent = err.message;
+  }
+});
+
+// ---- Informes de seguimiento ----
+
+async function loadCadetNotes(cadetId) {
+  const res = await fetch(`/api/cadets/${cadetId}/notes`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  renderCadetNotes(rows);
+}
+
+function renderCadetNotes(rows) {
+  if (rows.length === 0) {
+    cadetNotesListEl.innerHTML = '<div class="staff-empty">Todavía no hay informes de seguimiento.</div>';
+    return;
+  }
+  cadetNotesListEl.innerHTML = rows.map((n) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(n.author_name || 'Staff')}</span>
+        <span class="muted-link">${formatDate(n.created_at)}</span>
+        <div class="muted-link" style="flex-basis:100%; white-space:pre-wrap;">${escapeHtml(n.body)}</div>
+      </div>
+      <button class="btn btn-danger btn-sm" data-delete-note="${n.id}">Eliminar</button>
+    </div>
+  `).join('');
+
+  cadetNotesListEl.querySelectorAll('[data-delete-note]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este informe de seguimiento?')) return;
+      await fetch(`/api/cadet-notes/${btn.dataset.deleteNote}`, { method: 'DELETE' });
+      await loadCadetNotes(currentCadetId);
+      showToast('Informe eliminado.', 'danger');
+    });
+  });
+}
+
+document.getElementById('cadet-note-add-btn').addEventListener('click', async () => {
+  if (!currentCadetId) return;
+  const msg = document.getElementById('cadet-note-message');
+  msg.className = 'message';
+  msg.textContent = '';
+
+  const body = document.getElementById('cadet-note-body').value.trim();
+  if (!body) {
+    msg.className = 'message error';
+    msg.textContent = 'Escribí algo antes de agregar el informe.';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cadets/${currentCadetId}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo agregar el informe');
+
+    document.getElementById('cadet-note-body').value = '';
+    await loadCadetNotes(currentCadetId);
+    showToast('Informe agregado.');
+  } catch (err) {
+    msg.className = 'message error';
+    msg.textContent = err.message;
+  }
+});
+
+// ---- Cursos y clases ----
+
+async function loadAcademyCourses() {
+  const res = await fetch('/api/academy-courses');
+  if (!res.ok) return;
+  academyCourses = await res.json();
+  renderCoursesList();
+}
+
+function renderCoursesList() {
+  if (academyCourses.length === 0) {
+    coursesListEl.innerHTML = '';
+    coursesEmptyEl.style.display = 'block';
+    return;
+  }
+  coursesEmptyEl.style.display = 'none';
+  coursesListEl.innerHTML = academyCourses.map((c) => `
+    <div class="staff-row row-link" data-course-id="${c.id}">
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(c.name)}</span>
+        ${c.department ? `<span class="dept-badge dept-${c.department}">${departmentLabel(c.department)}</span>` : '<span class="dept-badge">Compartido</span>'}
+        <span class="status-pill ${c.active ? 'status-aprobado' : 'status-baja'}">${c.active ? 'Activo' : 'Inactivo'}</span>
+      </div>
+      <span class="row-chevron">›</span>
+    </div>
+  `).join('');
+
+  coursesListEl.querySelectorAll('[data-course-id]').forEach((row) => {
+    row.addEventListener('click', () => openCourseModal(Number(row.dataset.courseId)));
+  });
+}
+
+function resetCourseForm() {
+  courseForm.reset();
+  courseMessage.className = 'message';
+  courseMessage.textContent = '';
+}
+
+function openNewCourseModal() {
+  currentCourseId = null;
+  resetCourseForm();
+
+  document.getElementById('course-modal-title').textContent = 'Nuevo curso';
+  document.getElementById('course-modal-sub').textContent = '';
+  courseFormSubmit.textContent = 'Crear curso';
+  courseDeleteBtn.style.display = 'none';
+  courseActiveField.style.display = 'none';
+  courseClassesSection.style.display = 'none';
+  courseDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
+
+  courseModalBackdrop.classList.add('open');
+}
+
+async function openCourseModal(id) {
+  const c = academyCourses.find((x) => x.id === id);
+  if (!c) return;
+  currentCourseId = id;
+  resetCourseForm();
+
+  document.getElementById('course-modal-title').textContent = c.name;
+  document.getElementById('course-modal-sub').textContent = c.department ? departmentLabel(c.department) : 'Compartido (SAMS y SAFD)';
+  courseFormSubmit.textContent = 'Guardar cambios';
+  courseDeleteBtn.style.display = 'inline-flex';
+  courseActiveField.style.display = 'flex';
+  courseDepartmentField.style.display = 'none';
+  courseClassesSection.style.display = 'block';
+
+  document.getElementById('course-name').value = c.name;
+  document.getElementById('course-description').value = c.description || '';
+  document.getElementById('course-active').checked = !!c.active;
+
+  populateClassInstructorSelect(c.department);
+  classesListEl.innerHTML = '<div class="staff-empty">Cargando…</div>';
+  courseModalBackdrop.classList.add('open');
+
+  await loadClasses(id);
+}
+
+function closeCourseModal() {
+  courseModalBackdrop.classList.remove('open');
+  currentCourseId = null;
+}
+
+courseForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  courseMessage.className = 'message';
+  courseMessage.textContent = '';
+
+  const isEdit = !!currentCourseId;
+  const body = {
+    name: document.getElementById('course-name').value.trim(),
+    description: document.getElementById('course-description').value.trim(),
+  };
+  if (!isEdit) {
+    body.department = document.getElementById('course-department').value || undefined;
+  } else {
+    body.active = document.getElementById('course-active').checked;
+  }
+
+  const submitBtn = courseFormSubmit;
+  submitBtn.disabled = true;
+  try {
+    const url = isEdit ? `/api/academy-courses/${currentCourseId}` : '/api/academy-courses';
+    const method = isEdit ? 'PATCH' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el curso');
+
+    showToast(isEdit ? 'Curso actualizado.' : 'Curso creado.');
+    await loadAcademyCourses();
+    if (isEdit) {
+      await openCourseModal(currentCourseId);
+    } else {
+      closeCourseModal();
+    }
+  } catch (err) {
+    courseMessage.className = 'message error';
+    courseMessage.textContent = err.message;
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+courseDeleteBtn.addEventListener('click', async () => {
+  if (!currentCourseId) return;
+  if (!confirm('¿Eliminar este curso y sus clases programadas?')) return;
+  await fetch(`/api/academy-courses/${currentCourseId}`, { method: 'DELETE' });
+  closeCourseModal();
+  await loadAcademyCourses();
+  showToast('Curso eliminado.', 'danger');
+});
+
+document.getElementById('new-course-btn').addEventListener('click', openNewCourseModal);
+document.getElementById('course-modal-close').addEventListener('click', closeCourseModal);
+courseModalBackdrop.addEventListener('click', (e) => {
+  if (e.target === courseModalBackdrop) closeCourseModal();
+});
+
+function populateClassInstructorSelect(department) {
+  const select = document.getElementById('class-instructor');
+  const list = department ? employees.filter((e) => e.department === department && e.active) : employees.filter((e) => e.active);
+  select.innerHTML = '<option value="">Sin asignar</option>' + list.map((e) => (
+    `<option value="${e.id}">${escapeHtml(e.full_name)}</option>`
+  )).join('');
+}
+
+async function loadClasses(courseId) {
+  const res = await fetch(`/api/academy-courses/${courseId}/classes`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  renderClasses(rows);
+}
+
+function renderClasses(rows) {
+  if (rows.length === 0) {
+    classesListEl.innerHTML = '<div class="staff-empty">Todavía no hay clases programadas.</div>';
+    return;
+  }
+  classesListEl.innerHTML = rows.map((cl) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="staff-username">${escapeHtml(cl.title)}</span>
+        ${cl.scheduled_at ? `<span class="muted-link">${formatDate(cl.scheduled_at)}</span>` : '<span class="muted-link">Sin fecha</span>'}
+        ${cl.instructor_name ? `<span class="dept-badge">Instructor: ${escapeHtml(cl.instructor_name)}</span>` : ''}
+      </div>
+      <button class="btn btn-danger btn-sm" data-delete-class="${cl.id}">Eliminar</button>
+    </div>
+  `).join('');
+
+  classesListEl.querySelectorAll('[data-delete-class]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta clase?')) return;
+      await fetch(`/api/academy-classes/${btn.dataset.deleteClass}`, { method: 'DELETE' });
+      await loadClasses(currentCourseId);
+      showToast('Clase eliminada.', 'danger');
+    });
+  });
+}
+
+document.getElementById('class-add-btn').addEventListener('click', async () => {
+  if (!currentCourseId) return;
+  const msg = document.getElementById('class-message');
+  msg.className = 'message';
+  msg.textContent = '';
+
+  const title = document.getElementById('class-title').value.trim();
+  const scheduledAt = document.getElementById('class-scheduled-at').value;
+  const instructorEmployeeId = document.getElementById('class-instructor').value || undefined;
+  const notes = document.getElementById('class-notes').value.trim();
+
+  if (!title) {
+    msg.className = 'message error';
+    msg.textContent = 'Ponele un título a la clase.';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/academy-courses/${currentCourseId}/classes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, scheduledAt: scheduledAt || undefined, instructorEmployeeId, notes }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo agregar la clase');
+
+    document.getElementById('class-title').value = '';
+    document.getElementById('class-scheduled-at').value = '';
+    document.getElementById('class-notes').value = '';
+    await loadClasses(currentCourseId);
+    showToast('Clase agregada.');
+  } catch (err) {
+    msg.className = 'message error';
+    msg.textContent = err.message;
+  }
 });
 
 checkSession().then(() => {

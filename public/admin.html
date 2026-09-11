@@ -33,6 +33,7 @@
 
         <span class="sidebar-section-label" id="nav-section-reclutamiento" style="display:none">Reclutamiento</span>
         <button class="sidebar-link tab-btn" data-tab="postulaciones" id="nav-postulaciones-btn" style="display:none"><span class="sidebar-link-icon">📋</span> Postulaciones</button>
+        <button class="sidebar-link tab-btn" data-tab="academia" id="nav-academia-btn" style="display:none"><span class="sidebar-link-icon">🎓</span> Academia</button>
 
         <span class="sidebar-section-label" id="nav-section-rrhh" style="display:none">Recursos humanos</span>
         <button class="sidebar-link tab-btn" data-tab="personal" id="nav-personal-btn" style="display:none"><span class="sidebar-link-icon">👥</span> Personal</button>
@@ -391,6 +392,69 @@
               <div id="cases-empty" class="empty-state" style="display:none">
                 <div class="empty-icon">🩺</div>
                 <p>No hay atenciones cargadas en esta categoría.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-academia" style="display:none">
+          <div class="stats-grid" id="academia-stats-grid">
+            <div class="stat-card">
+              <div class="stat-value" id="acstat-total">–</div>
+              <div class="stat-label">Cadetes</div>
+            </div>
+            <div class="stat-card stat-pendiente">
+              <div class="stat-value" id="acstat-activos">–</div>
+              <div class="stat-label">En formación</div>
+            </div>
+            <div class="stat-card stat-aprobado">
+              <div class="stat-value" id="acstat-graduados">–</div>
+              <div class="stat-label">Graduados</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="toolbar">
+              <button class="btn academia-subtab-btn active" data-subtab="cadetes">Cadetes</button>
+              <button class="btn academia-subtab-btn" data-subtab="cursos">Cursos y clases</button>
+            </div>
+          </div>
+
+          <div id="academia-cadetes-panel">
+            <div class="card">
+              <div class="toolbar" id="academia-dept-filter-row">
+                <button class="btn academia-dept-filter-btn active" data-department="">Todos los departamentos</button>
+                <button class="btn academia-dept-filter-btn" data-department="sams">SAMS</button>
+                <button class="btn academia-dept-filter-btn" data-department="safd">SAFD</button>
+              </div>
+              <div class="toolbar">
+                <button class="btn academia-status-filter-btn active" data-status="">Todos</button>
+                <button class="btn academia-status-filter-btn" data-status="activo">Activos</button>
+                <button class="btn academia-status-filter-btn" data-status="graduado">Graduados</button>
+                <button class="btn academia-status-filter-btn" data-status="expulsado">Expulsados</button>
+                <button class="btn academia-status-filter-btn" data-status="baja">Baja</button>
+                <span style="flex:1"></span>
+                <input type="text" id="cadets-search-input" class="search-input" placeholder="Buscar cadete..." />
+                <button id="new-cadet-btn" class="btn-primary btn-sm">+ Nuevo cadete</button>
+              </div>
+
+              <div id="cadets-list" class="staff-list"></div>
+              <div id="cadets-empty" class="empty-state" style="display:none">
+                <div class="empty-icon">🎓</div>
+                <p>No hay cadetes cargados en esta categoría.</p>
+              </div>
+            </div>
+          </div>
+
+          <div id="academia-cursos-panel" style="display:none">
+            <div class="card">
+              <div class="toolbar">
+                <button id="new-course-btn" class="btn-primary btn-sm">+ Nuevo curso</button>
+              </div>
+              <div id="courses-list" class="staff-list"></div>
+              <div id="courses-empty" class="empty-state" style="display:none">
+                <div class="empty-icon">📚</div>
+                <p>Todavía no hay cursos cargados.</p>
               </div>
             </div>
           </div>
@@ -791,6 +855,189 @@
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="case-modal-close">Cerrar</button>
         <button class="btn btn-danger btn-sm" id="case-delete-btn" style="display:none">Eliminar atención</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="cadet-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="cadet-modal-name"></h2>
+          <p class="subtitle" id="cadet-modal-sub"></p>
+        </div>
+        <div class="modal-header-badges">
+          <span id="cadet-modal-department"></span>
+          <span id="cadet-modal-status"></span>
+        </div>
+      </div>
+
+      <form id="cadet-form">
+        <div class="row">
+          <div>
+            <label for="cadet-fullname">Nombre completo</label>
+            <input type="text" id="cadet-fullname" required autocomplete="off" />
+          </div>
+          <div>
+            <label for="cadet-phone">Teléfono <span class="hint">(opcional)</span></label>
+            <input type="tel" id="cadet-phone" autocomplete="off" />
+          </div>
+        </div>
+
+        <label for="cadet-discord">ID de Discord <span class="hint">(opcional, el numérico)</span></label>
+        <input type="text" id="cadet-discord" autocomplete="off" />
+
+        <div id="cadet-department-field">
+          <label for="cadet-department">Departamento</label>
+          <select id="cadet-department">
+            <option value="sams">SAMS</option>
+            <option value="safd">SAFD</option>
+          </select>
+        </div>
+
+        <div id="cadet-status-field" style="display:none">
+          <label for="cadet-status">Estado</label>
+          <select id="cadet-status">
+            <option value="activo">Activo</option>
+            <option value="graduado">Graduado</option>
+            <option value="expulsado">Expulsado</option>
+            <option value="baja">Baja</option>
+          </select>
+        </div>
+
+        <label for="cadet-notes">Notas generales <span class="hint">(opcional)</span></label>
+        <textarea id="cadet-notes"></textarea>
+
+        <div class="submit-row">
+          <button type="submit" class="btn-primary" id="cadet-form-submit">Registrar cadete</button>
+        </div>
+        <div id="cadet-message" class="message"></div>
+      </form>
+
+      <div id="cadet-graduate-section" style="display:none">
+        <h3 class="modal-section-title">Cuenta de empleado</h3>
+        <p class="subtitle" id="cadet-graduate-status"></p>
+        <div class="submit-row">
+          <button type="button" id="cadet-graduate-btn" class="btn-primary btn-sm">Graduar y crear cuenta de empleado</button>
+        </div>
+        <div id="cadet-graduate-message" class="message"></div>
+      </div>
+
+      <div id="cadet-evaluations-section" style="display:none">
+        <h3 class="modal-section-title">Evaluaciones</h3>
+        <div class="row">
+          <div>
+            <label for="evaluation-title">Título</label>
+            <input type="text" id="evaluation-title" placeholder="Ej: Examen final de teoría" />
+          </div>
+          <div>
+            <label for="evaluation-course">Curso <span class="hint">(opcional)</span></label>
+            <select id="evaluation-course"><option value="">Sin curso asociado</option></select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="evaluation-score">Puntaje <span class="hint">(opcional)</span></label>
+            <input type="number" id="evaluation-score" step="0.01" />
+          </div>
+          <div>
+            <label for="evaluation-max-score">Puntaje máximo</label>
+            <input type="number" id="evaluation-max-score" step="0.01" value="100" />
+          </div>
+        </div>
+        <label for="evaluation-passed">Resultado</label>
+        <select id="evaluation-passed">
+          <option value="">Sin definir</option>
+          <option value="1">Aprobado</option>
+          <option value="0">Reprobado</option>
+        </select>
+        <label for="evaluation-notes">Notas <span class="hint">(opcional)</span></label>
+        <textarea id="evaluation-notes"></textarea>
+        <div class="submit-row">
+          <button type="button" id="evaluation-add-btn" class="btn-primary btn-sm">Registrar evaluación</button>
+        </div>
+        <div id="evaluation-message" class="message"></div>
+        <div id="evaluations-list" class="staff-list"></div>
+      </div>
+
+      <div id="cadet-notes-section" style="display:none">
+        <h3 class="modal-section-title">Informes de seguimiento</h3>
+        <textarea id="cadet-note-body" placeholder="Observaciones sobre conducta, progreso o incidentes..."></textarea>
+        <div class="submit-row">
+          <button type="button" id="cadet-note-add-btn" class="btn-primary btn-sm">Agregar informe</button>
+        </div>
+        <div id="cadet-note-message" class="message"></div>
+        <div id="cadet-notes-list" class="staff-list"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="cadet-modal-close">Cerrar</button>
+        <button class="btn btn-danger btn-sm" id="cadet-delete-btn" style="display:none">Eliminar cadete</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="course-modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2 id="course-modal-title">Nuevo curso</h2>
+          <p class="subtitle" id="course-modal-sub"></p>
+        </div>
+      </div>
+
+      <form id="course-form">
+        <label for="course-name">Nombre</label>
+        <input type="text" id="course-name" required placeholder="Ej: Primeros auxilios básicos" />
+
+        <div id="course-department-field">
+          <label for="course-department">Departamento <span class="hint">(opcional)</span></label>
+          <select id="course-department">
+            <option value="">Compartido (SAMS y SAFD)</option>
+            <option value="sams">Solo SAMS</option>
+            <option value="safd">Solo SAFD</option>
+          </select>
+        </div>
+
+        <label for="course-description">Descripción <span class="hint">(opcional)</span></label>
+        <textarea id="course-description"></textarea>
+
+        <label class="active-check-label" for="course-active" id="course-active-field" style="display:none">
+          <input type="checkbox" id="course-active" style="width:auto" /> Curso activo
+        </label>
+
+        <div class="submit-row">
+          <button type="submit" class="btn-primary" id="course-form-submit">Crear curso</button>
+        </div>
+        <div id="course-message" class="message"></div>
+      </form>
+
+      <div id="course-classes-section" style="display:none">
+        <h3 class="modal-section-title">Clases programadas</h3>
+        <div class="row">
+          <div>
+            <label for="class-title">Título</label>
+            <input type="text" id="class-title" placeholder="Ej: Clase 1 - Introducción" />
+          </div>
+          <div>
+            <label for="class-scheduled-at">Fecha y hora <span class="hint">(opcional)</span></label>
+            <input type="datetime-local" id="class-scheduled-at" />
+          </div>
+        </div>
+        <label for="class-instructor">Instructor <span class="hint">(opcional)</span></label>
+        <select id="class-instructor"><option value="">Sin asignar</option></select>
+        <label for="class-notes">Notas <span class="hint">(opcional)</span></label>
+        <input type="text" id="class-notes" />
+        <div class="submit-row">
+          <button type="button" id="class-add-btn" class="btn-primary btn-sm">Agregar clase</button>
+        </div>
+        <div id="class-message" class="message"></div>
+        <div id="classes-list" class="staff-list"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm" id="course-modal-close">Cerrar</button>
+        <button class="btn btn-danger btn-sm" id="course-delete-btn" style="display:none">Eliminar curso</button>
       </div>
     </div>
   </div>
