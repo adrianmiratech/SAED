@@ -414,14 +414,12 @@
           </div>
 
           <div class="card">
-            <div class="toolbar">
-              <button class="btn academia-subtab-btn active" data-subtab="cadetes">Cadetes</button>
-              <button class="btn academia-subtab-btn" data-subtab="cursos">Cursos y clases</button>
+            <div class="subtab-switch">
+              <button class="subtab-btn academia-subtab-btn active" data-subtab="cadetes">🎓 Cadetes</button>
+              <button class="subtab-btn academia-subtab-btn" data-subtab="cursos">📚 Cursos y clases</button>
             </div>
-          </div>
 
-          <div id="academia-cadetes-panel">
-            <div class="card">
+            <div id="academia-cadetes-panel">
               <div class="toolbar" id="academia-dept-filter-row">
                 <button class="btn academia-dept-filter-btn active" data-department="">Todos los departamentos</button>
                 <button class="btn academia-dept-filter-btn" data-department="sams">SAMS</button>
@@ -441,14 +439,13 @@
               <div id="cadets-list" class="staff-list"></div>
               <div id="cadets-empty" class="empty-state" style="display:none">
                 <div class="empty-icon">🎓</div>
-                <p>No hay cadetes cargados en esta categoría.</p>
+                <p>No hay cadetes cargados en esta categoría todavía. Se suman automáticamente cuando aprobás una postulación.</p>
               </div>
             </div>
-          </div>
 
-          <div id="academia-cursos-panel" style="display:none">
-            <div class="card">
+            <div id="academia-cursos-panel" style="display:none">
               <div class="toolbar">
+                <span style="flex:1"></span>
                 <button id="new-course-btn" class="btn-primary btn-sm">+ Nuevo curso</button>
               </div>
               <div id="courses-list" class="staff-list"></div>
@@ -671,8 +668,7 @@
         </button>
       </div>
 
-      <label for="modal-rank">Rango a asignar al aprobar</label>
-      <select id="modal-rank"></select>
+      <p class="subtitle" style="margin:0 0 14px;">Al aprobar, el postulante entra a la Academia como cadete. El rango se le asigna recién cuando se gradúa.</p>
 
       <div class="review-secondary">
         <button class="btn btn-info btn-sm" data-action="en_revision">En revisión</button>

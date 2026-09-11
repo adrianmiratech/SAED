@@ -38,7 +38,6 @@ const CADET_STATUS_PILL_CLASS = { activo: 'status-en_revision', graduado: 'statu
 const tableBody = document.getElementById('table-body');
 const emptyEl = document.getElementById('empty');
 const modalBackdrop = document.getElementById('modal-backdrop');
-const modalRankSelect = document.getElementById('modal-rank');
 const whoamiEl = document.getElementById('whoami');
 const searchInput = document.getElementById('search-input');
 const toastContainer = document.getElementById('toast-container');
@@ -220,7 +219,6 @@ function openModal(id) {
   document.getElementById('modal-experience').textContent = a.experience;
   document.getElementById('modal-motivation').textContent = a.motivation;
   document.getElementById('modal-notes').value = a.review_notes || '';
-  populateRankSelect(a.department, null, modalRankSelect);
 
   document.getElementById('modal-status').innerHTML = `<span class="status-pill status-${a.status}">${STATUS_LABELS[a.status] || capitalize(a.status)}</span>`;
 
@@ -256,11 +254,6 @@ async function updateStatus(status, btn) {
   if (!currentId) return;
   const reviewNotes = document.getElementById('modal-notes').value;
 
-  if (status === 'aprobado' && !modalRankSelect.value) {
-    showToast('Elegí el rango a asignar antes de aprobar.', 'danger');
-    return;
-  }
-
   const originalText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Guardando...';
@@ -268,17 +261,13 @@ async function updateStatus(status, btn) {
     const res = await fetch(`/api/applications/${currentId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        status,
-        reviewNotes,
-        rankId: status === 'aprobado' ? Number(modalRankSelect.value) : undefined,
-      }),
+      body: JSON.stringify({ status, reviewNotes }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo actualizar la postulación');
     closeModal();
     await loadApplications();
-    showToast(status === 'aprobado' ? 'Postulación aprobada y sumada al roster de Personal.' : 'Postulación actualizada.');
+    showToast(status === 'aprobado' ? 'Postulación aprobada y sumada a la Academia como cadete.' : 'Postulación actualizada.');
   } catch (err) {
     showToast(err.message, 'danger');
   } finally {

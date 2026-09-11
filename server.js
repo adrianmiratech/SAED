@@ -339,23 +339,13 @@ app.get('/api/applications/:id', requireAuth, async (req, res) => {
 });
 
 app.patch('/api/applications/:id', requireAuth, async (req, res) => {
-  const { status, reviewNotes, rankId } = req.body || {};
+  const { status, reviewNotes } = req.body || {};
   const row = await db.prepare('SELECT * FROM applications WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No encontrada' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
   if (status && !VALID_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Estado inválido' });
-  }
-
-  // Al aprobar, el encargado tiene que elegir el rango del roster de
-  // Personal con el que ingresa el postulante.
-  let rank = null;
-  if (status === 'aprobado') {
-    rank = await validateRankForDepartment(rankId, row.department);
-    if (!rank) {
-      return res.status(400).json({ error: 'Rango inválido para ese departamento' });
-    }
   }
 
   await db.prepare(`
@@ -370,20 +360,20 @@ app.patch('/api/applications/:id', requireAuth, async (req, res) => {
   );
 
   if (status === 'aprobado') {
-    // Si ya existe un empleado con el mismo nombre y departamento (por
-    // ejemplo, porque esta postulación se había aprobado antes), solo se
-    // actualiza su rango en vez de duplicarlo.
+    // Aprobar no da de alta un empleado directamente: el postulante entra
+    // a la Academia como cadete, y solo se convierte en empleado cuando
+    // RTD lo gradúa (con el rango de entrada de su departamento). Si ya
+    // existe un cadete con el mismo nombre y departamento (por ejemplo,
+    // porque esta postulación se había aprobado antes), no se duplica.
     const existing = await db.prepare(
-      'SELECT id FROM employees WHERE department = ? AND full_name = ?',
+      'SELECT id FROM cadets WHERE department = ? AND full_name = ?',
     ).get(row.department, row.full_name);
 
-    if (existing) {
-      await db.prepare('UPDATE employees SET rank_id = ?, active = 1 WHERE id = ?').run(rank.id, existing.id);
-    } else {
+    if (!existing) {
       await db.prepare(`
-        INSERT INTO employees (full_name, discord_info, department, rank_id, created_by)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(row.full_name, row.discord_info, row.department, rank.id, req.session.username);
+        INSERT INTO cadets (full_name, discord_info, department, created_by)
+        VALUES (?, ?, ?, ?)
+      `).run(row.full_name, row.discord_info, row.department, req.session.username);
     }
   }
 

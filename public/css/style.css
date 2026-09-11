@@ -577,8 +577,7 @@ button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); out
 .cases-dept-filter-btn,
 .cases-status-filter-btn,
 .academia-dept-filter-btn,
-.academia-status-filter-btn,
-.academia-subtab-btn {
+.academia-status-filter-btn {
   background: var(--panel-alt);
   border: 1px solid var(--border);
   color: var(--text-muted);
@@ -591,8 +590,7 @@ button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); out
 .cases-dept-filter-btn.active,
 .cases-status-filter-btn.active,
 .academia-dept-filter-btn.active,
-.academia-status-filter-btn.active,
-.academia-subtab-btn.active {
+.academia-status-filter-btn.active {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
@@ -787,6 +785,34 @@ tr:hover td { background: var(--panel-alt); }
 .status-aprobado { background: var(--ok-bg); color: var(--ok); }
 .status-rechazado { background: var(--danger-bg); color: var(--danger); }
 .status-baja { background: var(--panel-alt); color: var(--text-muted); }
+
+.subtab-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 18px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.subtab-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.subtab-btn:hover { color: var(--text); }
+.subtab-btn.active {
+  background: linear-gradient(145deg, var(--accent), var(--accent-dark));
+  color: #04222a;
+  box-shadow: 0 6px 18px rgba(22, 194, 207, 0.32);
+}
 
 .row-link { cursor: pointer; }
 
