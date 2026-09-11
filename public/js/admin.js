@@ -6,6 +6,12 @@ let currentId = null;
 let scopedDepartment = null;
 let currentUsername = null;
 let hasHrAccess = false;
+let isStaff = false;
+let isSuperadmin = false;
+
+function canManage() {
+  return isStaff || isSuperadmin;
+}
 
 let ranks = [];
 let employees = [];
@@ -16,6 +22,7 @@ let currentEmployeeId = null;
 const DEPARTMENT_LABELS = { sams: 'SAMS', safd: 'SAFD' };
 const STATUS_LABELS = { pendiente: 'Pendiente', en_revision: 'En revisión', aprobado: 'Aprobado', rechazado: 'Rechazado' };
 const PAGE_TITLES = {
+  fichaje: ['Mi Fichaje', 'Marcá tu entrada y salida, y consultá tu historial.'],
   postulaciones: ['Postulaciones', 'Revisá, filtrá y gestioná las postulaciones a SAMS y SAFD.'],
   personal: ['Personal', 'Roster de empleados, rangos, roles y nómina del SAED.'],
   fichajes: ['Fichajes', 'Control de entrada y salida del personal.'],
@@ -31,11 +38,6 @@ const whoamiEl = document.getElementById('whoami');
 const searchInput = document.getElementById('search-input');
 const toastContainer = document.getElementById('toast-container');
 const deptFilterRow = document.getElementById('dept-filter-row');
-const manageStaffBtn = document.getElementById('manage-staff-btn');
-const staffModalBackdrop = document.getElementById('staff-modal-backdrop');
-const staffList = document.getElementById('staff-list');
-const staffForm = document.getElementById('staff-form');
-const staffMessage = document.getElementById('staff-message');
 
 const tabPostulaciones = document.getElementById('tab-postulaciones');
 const tabPersonal = document.getElementById('tab-personal');
@@ -67,14 +69,19 @@ async function checkSession() {
     window.location.href = '/login.html';
     return;
   }
-  scopedDepartment = data.department || null;
-  currentUsername = data.username;
+  isStaff = !!data.isStaff;
+  isSuperadmin = !!data.isSuperadmin;
   hasHrAccess = !!data.hrAccess;
-  whoamiEl.textContent = data.username;
-  document.getElementById('whoami-avatar').textContent = initials(data.username);
-  document.getElementById('whoami-scope').textContent = scopedDepartment
-    ? departmentLabel(scopedDepartment)
-    : 'Todos los departamentos';
+  // null = ve todo (superadmin); si no, el empleado queda atado a su
+  // propio departamento en todos los filtros del panel.
+  scopedDepartment = isSuperadmin ? null : data.department;
+  currentUsername = data.username;
+
+  whoamiEl.textContent = data.fullName || data.username;
+  document.getElementById('whoami-avatar').textContent = initials(data.fullName || data.username);
+  document.getElementById('whoami-scope').textContent = isSuperadmin
+    ? 'Todos los departamentos'
+    : departmentLabel(data.department);
 
   if (scopedDepartment) {
     // Staff restringido a un departamento: no tiene sentido mostrar el
@@ -94,19 +101,28 @@ async function checkSession() {
 
     document.getElementById('cases-dept-filter-row').style.display = 'none';
     currentCasesDeptFilter = scopedDepartment;
-  } else {
-    // Solo el staff sin departamento asignado gestiona otras cuentas,
-    // define las tarifas de pago por rango y administra los roles.
-    manageStaffBtn.style.display = 'inline-flex';
+  }
+  if (isSuperadmin) {
+    // Solo el superadmin define tarifas de pago por rango y administra roles.
     ratesBtn.style.display = 'inline-flex';
     document.getElementById('roles-btn').style.display = 'inline-flex';
   }
 
-  // Fichajes: solo lo ve el staff sin departamento (nivel SAED) o quien
-  // tenga el permiso explícito de RRHH/Dirección.
-  if (!scopedDepartment || hasHrAccess) {
-    document.getElementById('fichajes-nav-btn').style.display = 'flex';
-  }
+  // Los módulos de gestión son solo para staff/superadmin; un empleado
+  // común únicamente ve "Mi Fichaje". Fichajes (ver todo el personal) es
+  // aparte: superadmin o quien tenga el permiso explícito de RRHH/Dirección.
+  const canManageNow = canManage();
+  const canViewAttendance = isSuperadmin || hasHrAccess;
+  [
+    'nav-section-reclutamiento', 'nav-postulaciones-btn',
+    'nav-personal-btn', 'nav-inventario-btn', 'nav-atenciones-btn', 'nav-section-ops',
+  ].forEach((id) => {
+    document.getElementById(id).style.display = canManageNow ? '' : 'none';
+  });
+  document.getElementById('nav-section-rrhh').style.display = (canManageNow || canViewAttendance) ? '' : 'none';
+  document.getElementById('fichajes-nav-btn').style.display = canViewAttendance ? '' : 'none';
+
+  switchTab(canManageNow ? 'postulaciones' : 'fichaje');
 }
 
 async function loadApplications() {
@@ -264,115 +280,6 @@ async function deleteApplication() {
   showToast('Postulación eliminada.', 'danger');
 }
 
-async function loadStaff() {
-  const res = await fetch('/api/admins');
-  if (!res.ok) return;
-  const staff = await res.json();
-  renderStaffList(staff);
-}
-
-function renderStaffList(staff) {
-  staffList.innerHTML = '';
-  if (staff.length === 0) {
-    staffList.innerHTML = '<div class="staff-empty">No hay usuarios cargados.</div>';
-    return;
-  }
-  for (const s of staff) {
-    const row = document.createElement('div');
-    row.className = 'staff-row';
-    const deptBadge = s.department
-      ? `<span class="dept-badge dept-${s.department}">${departmentLabel(s.department)}</span>`
-      : '<span class="dept-badge">Todos</span>';
-    row.innerHTML = `
-      <div class="staff-meta">
-        <span class="staff-username">${escapeHtml(s.username)}</span>
-        ${deptBadge}
-        <button class="status-pill ${s.hr_access ? 'status-aprobado' : 'status-pendiente'}" style="border:none;cursor:pointer" data-toggle-hr="${s.id}" data-hr="${s.hr_access ? '0' : '1'}">${s.hr_access ? 'RRHH/Dirección ✓' : 'Sin acceso a fichajes'}</button>
-      </div>
-      <button class="btn btn-danger btn-sm" data-delete-staff="${s.id}" ${s.username === currentUsername ? 'disabled' : ''}>Eliminar</button>
-    `;
-    staffList.appendChild(row);
-  }
-
-  staffList.querySelectorAll('[data-delete-staff]').forEach((btn) => {
-    btn.addEventListener('click', () => deleteStaff(btn.dataset.deleteStaff));
-  });
-  staffList.querySelectorAll('[data-toggle-hr]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      await fetch(`/api/admins/${btn.dataset.toggleHr}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hrAccess: btn.dataset.hr === '1' }),
-      });
-      loadStaff();
-    });
-  });
-}
-
-async function deleteStaff(id) {
-  if (!confirm('¿Eliminar este usuario de staff?')) return;
-  const res = await fetch(`/api/admins/${id}`, { method: 'DELETE' });
-  const data = await res.json();
-  if (!res.ok) {
-    showToast(data.error || 'No se pudo eliminar el usuario', 'danger');
-    return;
-  }
-  showToast('Usuario eliminado.');
-  loadStaff();
-}
-
-function openStaffModal() {
-  staffMessage.className = 'message';
-  staffMessage.textContent = '';
-  staffForm.reset();
-  staffModalBackdrop.classList.add('open');
-  loadStaff();
-}
-
-function closeStaffModal() {
-  staffModalBackdrop.classList.remove('open');
-}
-
-staffForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  staffMessage.className = 'message';
-  staffMessage.textContent = '';
-
-  const username = document.getElementById('staff-username').value.trim();
-  const password = document.getElementById('staff-password').value;
-  const department = document.getElementById('staff-department').value;
-  const hrAccess = document.getElementById('staff-hr-access').checked;
-
-  const submitBtn = staffForm.querySelector('button[type="submit"]');
-  submitBtn.disabled = true;
-
-  try {
-    const res = await fetch('/api/admins', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, department: department || undefined, hrAccess }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'No se pudo crear el usuario');
-
-    staffMessage.className = 'message success';
-    staffMessage.textContent = `Usuario "${data.username}" creado.`;
-    staffForm.reset();
-    loadStaff();
-  } catch (err) {
-    staffMessage.className = 'message error';
-    staffMessage.textContent = err.message;
-  } finally {
-    submitBtn.disabled = false;
-  }
-});
-
-manageStaffBtn.addEventListener('click', openStaffModal);
-document.getElementById('staff-modal-close').addEventListener('click', closeStaffModal);
-staffModalBackdrop.addEventListener('click', (e) => {
-  if (e.target === staffModalBackdrop) closeStaffModal();
-});
-
 function formatDate(iso) {
   if (!iso) return '';
   const d = new Date(iso.replace(' ', 'T') + 'Z');
@@ -425,7 +332,6 @@ modalBackdrop.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (modalBackdrop.classList.contains('open')) closeModal();
-  if (staffModalBackdrop.classList.contains('open')) closeStaffModal();
 });
 document.querySelectorAll('[data-action]').forEach((btn) => {
   btn.addEventListener('click', () => updateStatus(btn.dataset.action, btn));
@@ -472,36 +378,110 @@ document.getElementById('export-btn').addEventListener('click', () => {
 
 // ---------- Navegación entre módulos (sidebar) ----------
 
-const TAB_IDS = ['postulaciones', 'personal', 'fichajes', 'inventario', 'atenciones'];
+const TAB_IDS = ['fichaje', 'postulaciones', 'personal', 'fichajes', 'inventario', 'atenciones'];
+
+async function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  closeSidebar();
+
+  TAB_IDS.forEach((id) => {
+    document.getElementById(`tab-${id}`).style.display = tab === id ? 'block' : 'none';
+  });
+
+  const [title, subtitle] = PAGE_TITLES[tab] || ['', ''];
+  document.getElementById('page-title').textContent = title;
+  document.getElementById('page-subtitle').textContent = subtitle;
+
+  if (tab === 'fichaje') {
+    loadMyClockStatus();
+    loadMyClockHistory();
+  } else if (tab === 'postulaciones') {
+    loadApplications();
+  } else if (tab === 'personal') {
+    if (ranks.length === 0) loadRanks();
+    if (employeeRoles.length === 0) loadEmployeeRoles();
+    loadEmployees();
+  } else if (tab === 'fichajes') {
+    loadAttendance();
+  } else if (tab === 'inventario') {
+    loadInventory();
+  } else if (tab === 'atenciones') {
+    if (employees.length === 0) await loadEmployees();
+    loadCases();
+  }
+}
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
-  btn.addEventListener('click', async () => {
-    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    closeSidebar();
-    const tab = btn.dataset.tab;
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
 
-    TAB_IDS.forEach((id) => {
-      document.getElementById(`tab-${id}`).style.display = tab === id ? 'block' : 'none';
-    });
+// ---------- Mi Fichaje (cualquier cuenta logueada, sea staff o no) ----------
 
-    const [title, subtitle] = PAGE_TITLES[tab] || ['', ''];
-    document.getElementById('page-title').textContent = title;
-    document.getElementById('page-subtitle').textContent = subtitle;
+const clockStatusEl = document.getElementById('clock-status');
+const clockSinceEl = document.getElementById('clock-since');
+const clockBtn = document.getElementById('clock-btn');
+const clockMessage = document.getElementById('clock-message');
+const myHistoryList = document.getElementById('my-history-list');
+const myHistoryEmpty = document.getElementById('my-history-empty');
 
-    if (tab === 'personal') {
-      if (ranks.length === 0) loadRanks();
-      if (employeeRoles.length === 0) loadEmployeeRoles();
-      loadEmployees();
-    } else if (tab === 'fichajes') {
-      loadAttendance();
-    } else if (tab === 'inventario') {
-      loadInventory();
-    } else if (tab === 'atenciones') {
-      if (employees.length === 0) await loadEmployees();
-      loadCases();
-    }
-  });
+async function loadMyClockStatus() {
+  const res = await fetch('/api/attendance/me/status');
+  if (res.status === 401) { window.location.href = '/login.html'; return; }
+  const data = await res.json();
+  if (data.clockedIn) {
+    clockStatusEl.textContent = 'Fichado — turno en curso';
+    clockStatusEl.className = 'clock-status is-in';
+    clockSinceEl.textContent = `Desde las ${formatDate(data.since)}`;
+    clockBtn.textContent = 'Fichar salida';
+    clockBtn.className = 'btn-danger clock-btn';
+  } else {
+    clockStatusEl.textContent = 'No fichado';
+    clockStatusEl.className = 'clock-status is-out';
+    clockSinceEl.textContent = '';
+    clockBtn.textContent = 'Fichar entrada';
+    clockBtn.className = 'btn-primary clock-btn';
+  }
+  clockBtn.disabled = false;
+}
+
+async function loadMyClockHistory() {
+  const res = await fetch('/api/attendance/me/history');
+  if (!res.ok) return;
+  const rows = await res.json();
+  if (rows.length === 0) {
+    myHistoryList.innerHTML = '';
+    myHistoryEmpty.style.display = 'block';
+    return;
+  }
+  myHistoryEmpty.style.display = 'none';
+  myHistoryList.innerHTML = rows.map((r) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="staff-username">${formatDate(r.clock_in)}</span>
+        <span class="muted-link">→ ${r.clock_out ? formatDate(r.clock_out) : 'en curso'}</span>
+      </div>
+      <span class="status-pill ${r.clock_out ? 'status-aprobado' : 'status-pendiente'}">${attendanceDuration(r.clock_in, r.clock_out)}</span>
+    </div>
+  `).join('');
+}
+
+clockBtn.addEventListener('click', async () => {
+  clockBtn.disabled = true;
+  clockMessage.className = 'message';
+  clockMessage.textContent = '';
+  try {
+    const res = await fetch('/api/attendance/me/clock', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo registrar el fichaje');
+
+    showToast(data.clockedIn ? 'Entrada registrada.' : 'Salida registrada.');
+    await loadMyClockStatus();
+    await loadMyClockHistory();
+  } catch (err) {
+    clockMessage.className = 'message error';
+    clockMessage.textContent = err.message;
+    clockBtn.disabled = false;
+  }
 });
 
 document.getElementById('personal-search-input').addEventListener('input', (e) => {
@@ -800,6 +780,7 @@ function openNewEmployeeModal() {
   employeeActiveField.style.display = 'none';
   employeePayrollSection.style.display = 'none';
   document.getElementById('employee-fichaje-section').style.display = 'none';
+  document.getElementById('employee-access-section').style.display = 'none';
   employeeDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
 
   // Si hay un filtro de departamento activo, el nuevo empleado arranca en
@@ -832,9 +813,19 @@ async function openEmployeeModal(id) {
   employeeDepartmentField.style.display = 'none';
   document.getElementById('employee-fichaje-section').style.display = 'block';
   document.getElementById('employee-fichaje-status').textContent = e.has_login
-    ? `Ya puede fichar con el usuario "${e.username}".`
-    : 'Este empleado todavía no tiene acceso para fichar.';
+    ? `Ya puede entrar al sistema con el usuario "${e.username}".`
+    : 'Este empleado todavía no tiene cuenta para entrar al sistema.';
   document.getElementById('employee-fichaje-username').value = e.username || '';
+
+  const accessSection = document.getElementById('employee-access-section');
+  if (isSuperadmin) {
+    accessSection.style.display = 'block';
+    document.getElementById('employee-is-staff').checked = !!e.is_staff;
+    document.getElementById('employee-is-superadmin').checked = !!e.is_superadmin;
+    document.getElementById('employee-hr-access').checked = !!e.hr_access;
+  } else {
+    accessSection.style.display = 'none';
+  }
 
   document.getElementById('employee-fullname').value = e.full_name;
   document.getElementById('employee-phone').value = e.phone || '';
@@ -930,12 +921,39 @@ document.getElementById('employee-fichaje-save-btn').addEventListener('click', a
     await loadEmployees();
     const updated = employees.find((x) => x.id === currentEmployeeId);
     document.getElementById('employee-fichaje-status').textContent = updated && updated.has_login
-      ? `Ya puede fichar con el usuario "${updated.username}".`
-      : 'Este empleado todavía no tiene acceso para fichar.';
-    showToast('Acceso de fichaje actualizado.');
+      ? `Ya puede entrar al sistema con el usuario "${updated.username}".`
+      : 'Este empleado todavía no tiene cuenta para entrar al sistema.';
+    showToast('Cuenta de acceso actualizada.');
   } catch (err) {
     fichajeMessage.className = 'message error';
     fichajeMessage.textContent = err.message;
+  }
+});
+
+document.getElementById('employee-access-save-btn').addEventListener('click', async () => {
+  if (!currentEmployeeId) return;
+  const accessMessage = document.getElementById('employee-access-message');
+  accessMessage.className = 'message';
+  accessMessage.textContent = '';
+
+  const isStaffChecked = document.getElementById('employee-is-staff').checked;
+  const isSuperadminChecked = document.getElementById('employee-is-superadmin').checked;
+  const hrAccessChecked = document.getElementById('employee-hr-access').checked;
+
+  try {
+    const res = await fetch(`/api/employees/${currentEmployeeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isStaff: isStaffChecked, isSuperadmin: isSuperadminChecked, hrAccess: hrAccessChecked }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el nivel de acceso');
+
+    await loadEmployees();
+    showToast('Nivel de acceso actualizado.');
+  } catch (err) {
+    accessMessage.className = 'message error';
+    accessMessage.textContent = err.message;
   }
 });
 
@@ -1901,6 +1919,8 @@ document.querySelectorAll('.cases-status-filter-btn').forEach((btn) => {
 });
 
 checkSession().then(() => {
-  loadApplications();
-  loadRanks();
+  // switchTab() ya cargó los datos de la pestaña inicial; acá solo hace
+  // falta precargar los rangos si es staff, porque el modal de aprobar
+  // postulación los necesita aunque todavía no se haya abierto Personal.
+  if (canManage() && ranks.length === 0) loadRanks();
 });

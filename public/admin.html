@@ -24,20 +24,22 @@
       </div>
 
       <nav class="sidebar-nav" id="main-tabs">
-        <span class="sidebar-section-label">Reclutamiento</span>
-        <button class="sidebar-link tab-btn active" data-tab="postulaciones"><span class="sidebar-link-icon">📋</span> Postulaciones</button>
+        <span class="sidebar-section-label">Mi cuenta</span>
+        <button class="sidebar-link tab-btn active" data-tab="fichaje"><span class="sidebar-link-icon">🕒</span> Mi Fichaje</button>
 
-        <span class="sidebar-section-label">Recursos humanos</span>
-        <button class="sidebar-link tab-btn" data-tab="personal"><span class="sidebar-link-icon">👥</span> Personal</button>
-        <button class="sidebar-link tab-btn" data-tab="fichajes" id="fichajes-nav-btn" style="display:none"><span class="sidebar-link-icon">🕒</span> Fichajes</button>
+        <span class="sidebar-section-label" id="nav-section-reclutamiento" style="display:none">Reclutamiento</span>
+        <button class="sidebar-link tab-btn" data-tab="postulaciones" id="nav-postulaciones-btn" style="display:none"><span class="sidebar-link-icon">📋</span> Postulaciones</button>
 
-        <span class="sidebar-section-label">Operaciones sanitarias</span>
-        <button class="sidebar-link tab-btn" data-tab="inventario"><span class="sidebar-link-icon">💊</span> Inventario</button>
-        <button class="sidebar-link tab-btn" data-tab="atenciones"><span class="sidebar-link-icon">🩺</span> Atenciones</button>
+        <span class="sidebar-section-label" id="nav-section-rrhh" style="display:none">Recursos humanos</span>
+        <button class="sidebar-link tab-btn" data-tab="personal" id="nav-personal-btn" style="display:none"><span class="sidebar-link-icon">👥</span> Personal</button>
+        <button class="sidebar-link tab-btn" data-tab="fichajes" id="fichajes-nav-btn" style="display:none"><span class="sidebar-link-icon">📊</span> Fichajes</button>
+
+        <span class="sidebar-section-label" id="nav-section-ops" style="display:none">Operaciones sanitarias</span>
+        <button class="sidebar-link tab-btn" data-tab="inventario" id="nav-inventario-btn" style="display:none"><span class="sidebar-link-icon">💊</span> Inventario</button>
+        <button class="sidebar-link tab-btn" data-tab="atenciones" id="nav-atenciones-btn" style="display:none"><span class="sidebar-link-icon">🩺</span> Atenciones</button>
       </nav>
 
       <div class="sidebar-footer">
-        <a href="/fichar.html" target="_blank" class="sidebar-fichar-link">🕒 Fichar mi entrada/salida</a>
         <a href="/" class="muted-link">← Ver sitio público</a>
       </div>
     </aside>
@@ -52,7 +54,6 @@
           </div>
         </div>
         <div class="top-actions">
-          <button id="manage-staff-btn" class="btn-ghost btn-sm" style="display:none">Gestionar staff</button>
           <span class="top-divider"></span>
           <div class="user-chip">
             <span class="user-chip-avatar" id="whoami-avatar"></span>
@@ -67,7 +68,25 @@
 
       <div class="content">
 
-        <div id="tab-postulaciones">
+        <div id="tab-fichaje">
+          <div class="card clock-card">
+            <div class="clock-status" id="clock-status">Consultando estado…</div>
+            <div class="clock-since" id="clock-since"></div>
+            <button id="clock-btn" class="btn-primary clock-btn" disabled>Cargando…</button>
+            <div id="clock-message" class="message"></div>
+          </div>
+
+          <div class="card">
+            <h3 class="modal-section-title" style="margin-top:0; padding-top:0; border-top:none;">Mi historial de fichajes</h3>
+            <div id="my-history-list" class="staff-list"></div>
+            <div id="my-history-empty" class="empty-state" style="display:none">
+              <div class="empty-icon">🕒</div>
+              <p>Todavía no fichaste ninguna entrada.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-postulaciones" style="display:none">
         <div class="stats-grid" id="stats-grid">
           <div class="stat-card">
             <div class="stat-value" id="stat-total">–</div>
@@ -394,8 +413,8 @@
       </form>
 
       <div id="employee-fichaje-section" style="display:none">
-        <h3 class="modal-section-title">Acceso de fichaje</h3>
-        <p class="subtitle" id="employee-fichaje-status">Este empleado todavía no tiene acceso para fichar.</p>
+        <h3 class="modal-section-title">Cuenta de acceso</h3>
+        <p class="subtitle" id="employee-fichaje-status">Este empleado todavía no tiene cuenta para entrar al sistema.</p>
         <div class="row">
           <div>
             <label for="employee-fichaje-username">Usuario</label>
@@ -410,6 +429,24 @@
           <button type="button" id="employee-fichaje-save-btn" class="btn-primary btn-sm">Guardar acceso</button>
         </div>
         <div id="employee-fichaje-message" class="message"></div>
+      </div>
+
+      <div id="employee-access-section" style="display:none">
+        <h3 class="modal-section-title">Nivel de acceso</h3>
+        <p class="subtitle">Todos pueden fichar con su cuenta. Esto define además qué ve en el panel de gestión.</p>
+        <label class="active-check-label" for="employee-is-staff">
+          <input type="checkbox" id="employee-is-staff" style="width:auto" /> Staff (entra al panel de gestión de su departamento)
+        </label>
+        <label class="active-check-label" for="employee-is-superadmin">
+          <input type="checkbox" id="employee-is-superadmin" style="width:auto" /> Superadmin (ve y gestiona ambos departamentos)
+        </label>
+        <label class="active-check-label" for="employee-hr-access">
+          <input type="checkbox" id="employee-hr-access" style="width:auto" /> Acceso a Fichajes (RRHH / Dirección)
+        </label>
+        <div class="submit-row">
+          <button type="button" id="employee-access-save-btn" class="btn-primary btn-sm">Guardar nivel de acceso</button>
+        </div>
+        <div id="employee-access-message" class="message"></div>
       </div>
 
       <div id="employee-payroll-section" style="display:none">
@@ -542,53 +579,6 @@
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="modal-close">Cerrar</button>
         <button class="btn btn-danger btn-sm" id="modal-delete">Eliminar postulación</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="staff-modal-backdrop">
-    <div class="modal">
-      <div class="modal-header">
-        <div>
-          <h2>Gestionar staff</h2>
-          <p class="subtitle">Crear cuentas y asignarles un departamento para revisar postulaciones.</p>
-        </div>
-      </div>
-
-      <h3 class="modal-section-title">Nuevo usuario</h3>
-      <form id="staff-form">
-        <div class="row">
-          <div>
-            <label for="staff-username">Usuario</label>
-            <input type="text" id="staff-username" required autocomplete="off" />
-          </div>
-          <div>
-            <label for="staff-password">Contraseña</label>
-            <input type="password" id="staff-password" required minlength="6" autocomplete="new-password" />
-          </div>
-        </div>
-        <label for="staff-department">Departamento</label>
-        <select id="staff-department">
-          <option value="">Todos (staff del SAED)</option>
-          <option value="sams">SAMS</option>
-          <option value="safd">SAFD</option>
-        </select>
-
-        <label class="active-check-label" for="staff-hr-access">
-          <input type="checkbox" id="staff-hr-access" style="width:auto" /> Acceso a fichajes (RRHH / Dirección)
-        </label>
-
-        <div class="submit-row">
-          <button type="submit" class="btn-primary">Crear usuario</button>
-        </div>
-        <div id="staff-message" class="message"></div>
-      </form>
-
-      <h3 class="modal-section-title">Usuarios existentes</h3>
-      <div id="staff-list" class="staff-list"></div>
-
-      <div class="modal-actions">
-        <button class="btn btn-ghost btn-sm" id="staff-modal-close">Cerrar</button>
       </div>
     </div>
   </div>

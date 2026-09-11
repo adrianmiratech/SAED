@@ -1,7 +1,9 @@
-// Crea o actualiza un usuario de staff, opcionalmente asignado a un departamento.
+// Crea o actualiza un usuario de staff (login unificado: la misma cuenta
+// sirve para el panel de gestión y para fichar), opcionalmente asignado a
+// un departamento.
 // Uso: node scripts/seed-admin.js <usuario> <contraseña> [departamento]
-//   departamento: "sams" o "safd" (opcional). Sin departamento, el usuario ve
-//   y gestiona postulaciones de todos los departamentos (staff del SAED).
+//   departamento: "sams" o "safd" (opcional). Sin departamento, el usuario es
+//   superadmin: ve y gestiona todo (ambos departamentos, staff, tarifas, roles).
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const db = require('../db');
@@ -24,17 +26,27 @@ if (departmentArg && !VALID_DEPARTMENTS.includes(departmentArg)) {
 
 (async () => {
   const hash = bcrypt.hashSync(password, 10);
+  const explicitDepartment = process.argv.length > 4;
 
-  const existing = await db.prepare('SELECT id, department FROM admins WHERE username = ?').get(username);
-  const department = departmentArg !== undefined && process.argv.length > 4
-    ? (departmentArg || null)
-    : (existing ? existing.department : null);
+  const existing = await db.prepare('SELECT id, department FROM employees WHERE username = ?').get(username);
+  const department = explicitDepartment
+    ? (departmentArg || 'sams')
+    : (existing ? existing.department : 'sams');
+  const isSuperadmin = explicitDepartment ? (departmentArg ? 0 : 1) : (existing ? existing.is_superadmin : 1);
 
   if (existing) {
-    await db.prepare('UPDATE admins SET password_hash = ?, department = ? WHERE username = ?').run(hash, department, username);
-    console.log(`Contraseña actualizada para "${username}". Departamento: ${department || 'todos'}.`);
+    await db.prepare(`
+      UPDATE employees SET password_hash = ?, department = ?, is_staff = 1, is_superadmin = ?, active = 1
+      WHERE username = ?
+    `).run(hash, department, isSuperadmin, username);
+    console.log(`Contraseña actualizada para "${username}". Departamento: ${departmentArg || (isSuperadmin ? 'todos' : department)}.`);
   } else {
-    await db.prepare('INSERT INTO admins (username, password_hash, department) VALUES (?, ?, ?)').run(username, hash, department);
-    console.log(`Usuario "${username}" creado. Departamento: ${department || 'todos'}.`);
+    const genericRank = await db.prepare('SELECT id FROM ranks WHERE level = 8 AND department IS NULL').get();
+    await db.prepare(`
+      INSERT INTO employees
+        (full_name, department, rank_id, active, is_staff, is_superadmin, hr_access, username, password_hash, created_by)
+      VALUES (?, ?, ?, 1, 1, ?, 1, ?, ?, 'seed-admin.js')
+    `).run(username, department, genericRank.id, isSuperadmin, username, hash);
+    console.log(`Usuario "${username}" creado. Departamento: ${departmentArg || (isSuperadmin ? 'todos' : department)}.`);
   }
 })();

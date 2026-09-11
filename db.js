@@ -182,6 +182,9 @@ async function setup() {
   await ensureColumn('employees', 'username TEXT');
   await ensureColumn('employees', 'password_hash TEXT');
   await ensureColumn('employees', 'role_id INTEGER REFERENCES employee_roles(id)');
+  await ensureColumn('employees', 'is_staff INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn('employees', 'is_superadmin INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn('employees', 'hr_access INTEGER NOT NULL DEFAULT 0');
   await ensureColumn('admins', 'hr_access INTEGER NOT NULL DEFAULT 0');
   // Índice único parcial-friendly: SQLite trata cada NULL como distinto en
   // un UNIQUE INDEX, así que varios empleados sin usuario de fichaje conviven bien.
@@ -226,15 +229,54 @@ async function setup() {
     }
   }
 
-  // Re-siembra el admin desde variables de entorno si están presentes,
-  // útil para el primer arranque contra una base nueva.
+  // Migración única: el login de staff vivía separado en la tabla admins
+  // (panel de gestión) del de fichaje (tabla employees). Ahora es una sola
+  // cuenta, así que cada admin pasa a ser un empleado con is_staff = 1 la
+  // primera vez que el server arranca con este código. No se borra la
+  // tabla admins ni sus filas, solo se copian (si el username ya existe
+  // como empleado, se lo deja como está para no pisar nada).
+  const adminRows = await prepare('SELECT * FROM admins').all();
+  if (adminRows.length > 0) {
+    const genericRank = await prepare('SELECT id FROM ranks WHERE level = 8 AND department IS NULL').get();
+    for (const a of adminRows) {
+      const existing = await prepare('SELECT id FROM employees WHERE username = ?').get(a.username);
+      if (existing) continue;
+      await prepare(`
+        INSERT INTO employees
+          (full_name, department, rank_id, active, is_staff, is_superadmin, hr_access, username, password_hash, created_by)
+        VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?, 'migración')
+      `).run(
+        a.username, a.department || 'sams', genericRank.id,
+        a.department ? 0 : 1, a.hr_access ? 1 : 0, a.username, a.password_hash,
+      );
+    }
+  }
+
+  // Re-siembra el superadmin desde variables de entorno si están
+  // presentes, útil para el primer arranque contra una base nueva. Ahora
+  // crea/actualiza directamente el empleado (login unificado), no la
+  // vieja tabla admins.
   if (process.env.ADMIN_USER && process.env.ADMIN_PASSWORD) {
     const bcrypt = require('bcryptjs');
     const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD, 10);
-    await prepare(`
-      INSERT INTO admins (username, password_hash, department) VALUES (?, ?, ?)
-      ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, department = excluded.department
-    `).run(process.env.ADMIN_USER, hash, process.env.ADMIN_DEPARTMENT || null);
+    const department = process.env.ADMIN_DEPARTMENT || 'sams';
+    const isSuperadmin = process.env.ADMIN_DEPARTMENT ? 0 : 1;
+    const genericRank = await prepare('SELECT id FROM ranks WHERE level = 8 AND department IS NULL').get();
+
+    const existing = await prepare('SELECT id FROM employees WHERE username = ?').get(process.env.ADMIN_USER);
+    if (existing) {
+      await prepare(`
+        UPDATE employees
+        SET password_hash = ?, department = ?, is_staff = 1, is_superadmin = ?, hr_access = 1, active = 1
+        WHERE id = ?
+      `).run(hash, department, isSuperadmin, existing.id);
+    } else {
+      await prepare(`
+        INSERT INTO employees
+          (full_name, department, rank_id, active, is_staff, is_superadmin, hr_access, username, password_hash, created_by)
+        VALUES (?, ?, ?, 1, 1, ?, 1, ?, ?, 'seed')
+      `).run(process.env.ADMIN_USER, department, genericRank.id, isSuperadmin, process.env.ADMIN_USER, hash);
+    }
   }
 }
 

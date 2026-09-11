@@ -24,16 +24,31 @@ app.use(cookieSession({
   sameSite: 'lax',
 }));
 
-function requireAuth(req, res, next) {
-  if (req.session && req.session.adminUser) return next();
+// Login único: toda persona (empleado o staff) entra con la misma cuenta
+// de la tabla employees. requireLoggedIn alcanza para fichar la propia
+// entrada/salida; requireAuth exige además ser staff (o superadmin) para
+// entrar a los módulos de gestión.
+function requireLoggedIn(req, res, next) {
+  if (req.session && req.session.employeeId) return next();
   return res.status(401).json({ error: 'No autenticado' });
 }
 
-// Solo el staff sin departamento asignado (ve todo, nivel SAED) puede
-// crear o borrar otras cuentas de staff.
+function requireAuth(req, res, next) {
+  if (req.session && req.session.employeeId && (req.session.isStaff || req.session.isSuperadmin)) return next();
+  return res.status(401).json({ error: 'No autenticado' });
+}
+
+// El superadmin (nivel SAED) ve ambos departamentos y es el único que
+// puede dar de alta staff, tocar tarifas, gestionar roles o borrar gente.
 function requireSuperAdmin(req, res, next) {
-  if (req.session && req.session.adminUser && !req.session.adminDepartment) return next();
+  if (req.session && req.session.employeeId && req.session.isSuperadmin) return next();
   return res.status(403).json({ error: 'No autorizado' });
+}
+
+// null = ve todo (superadmin); si no, queda atado al departamento del
+// propio empleado, sin importar qué mande el cliente en query/body.
+function scopedDepartment(req) {
+  return req.session.isSuperadmin ? null : req.session.department;
 }
 
 const VALID_STATUSES = ['pendiente', 'en_revision', 'aprobado', 'rechazado'];
@@ -47,6 +62,18 @@ function csvEscape(value) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+function sessionSnapshot(req) {
+  return {
+    authenticated: !!(req.session && req.session.employeeId),
+    username: req.session?.username || null,
+    fullName: req.session?.fullName || null,
+    department: req.session?.department || null,
+    isStaff: !!(req.session?.isStaff),
+    isSuperadmin: !!(req.session?.isSuperadmin),
+    hrAccess: !!(req.session?.hrAccess),
+  };
+}
+
 // ---------- Auth ----------
 
 app.post('/api/login', async (req, res) => {
@@ -55,15 +82,23 @@ app.post('/api/login', async (req, res) => {
     return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
   }
 
-  const admin = await db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
-  if (!admin || !bcrypt.compareSync(password, admin.password_hash)) {
+  const employee = await db.prepare('SELECT * FROM employees WHERE username = ?').get(username.trim());
+  if (!employee || !employee.password_hash || !bcrypt.compareSync(password, employee.password_hash)) {
     return res.status(401).json({ error: 'Credenciales inválidas' });
   }
+  if (!employee.active) {
+    return res.status(403).json({ error: 'Tu cuenta está inactiva. Consultá con tu departamento.' });
+  }
 
-  req.session.adminUser = admin.username;
-  req.session.adminDepartment = admin.department || null;
-  req.session.hrAccess = !!admin.hr_access;
-  res.json({ ok: true, username: admin.username, department: admin.department || null, hrAccess: !!admin.hr_access });
+  req.session.employeeId = employee.id;
+  req.session.username = employee.username;
+  req.session.fullName = employee.full_name;
+  req.session.department = employee.department;
+  req.session.isStaff = !!employee.is_staff;
+  req.session.isSuperadmin = !!employee.is_superadmin;
+  req.session.hrAccess = !!employee.hr_access;
+
+  res.json({ ok: true, ...sessionSnapshot(req) });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -72,75 +107,7 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/session', (req, res) => {
-  res.json({
-    authenticated: !!(req.session && req.session.adminUser),
-    username: req.session?.adminUser || null,
-    department: req.session?.adminDepartment || null,
-    hrAccess: !!(req.session?.hrAccess),
-  });
-});
-
-// ---------- Staff ----------
-
-app.get('/api/admins', requireAuth, requireSuperAdmin, async (req, res) => {
-  const rows = await db.prepare('SELECT id, username, department, hr_access, created_at FROM admins ORDER BY created_at ASC').all();
-  res.json(rows);
-});
-
-app.post('/api/admins', requireAuth, requireSuperAdmin, async (req, res) => {
-  const { username, password, department, hrAccess } = req.body || {};
-
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
-  }
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
-  }
-  if (department && !VALID_DEPARTMENTS.includes(department)) {
-    return res.status(400).json({ error: 'Departamento inválido' });
-  }
-
-  const existing = await db.prepare('SELECT id FROM admins WHERE username = ?').get(username.trim());
-  if (existing) {
-    return res.status(409).json({ error: 'Ya existe un usuario con ese nombre' });
-  }
-
-  const hash = bcrypt.hashSync(password, 10);
-  const info = await db.prepare('INSERT INTO admins (username, password_hash, department, hr_access) VALUES (?, ?, ?, ?)')
-    .run(username.trim(), hash, department || null, hrAccess ? 1 : 0);
-
-  res.status(201).json({ id: info.lastInsertRowid, username: username.trim(), department: department || null, hrAccess: !!hrAccess });
-});
-
-app.patch('/api/admins/:id', requireAuth, requireSuperAdmin, async (req, res) => {
-  const target = await db.prepare('SELECT * FROM admins WHERE id = ?').get(req.params.id);
-  if (!target) return res.status(404).json({ error: 'No encontrado' });
-
-  const { hrAccess } = req.body || {};
-  await db.prepare('UPDATE admins SET hr_access = ? WHERE id = ?').run(
-    hrAccess !== undefined ? (hrAccess ? 1 : 0) : target.hr_access,
-    req.params.id,
-  );
-  res.json({ ok: true });
-});
-
-app.delete('/api/admins/:id', requireAuth, requireSuperAdmin, async (req, res) => {
-  const target = await db.prepare('SELECT * FROM admins WHERE id = ?').get(req.params.id);
-  if (!target) return res.status(404).json({ error: 'No encontrado' });
-
-  if (target.username === req.session.adminUser) {
-    return res.status(400).json({ error: 'No podés eliminar tu propia cuenta' });
-  }
-
-  if (!target.department) {
-    const superAdminCount = (await db.prepare('SELECT COUNT(*) AS c FROM admins WHERE department IS NULL').get()).c;
-    if (superAdminCount <= 1) {
-      return res.status(400).json({ error: 'No podés eliminar el único usuario con acceso a todos los departamentos' });
-    }
-  }
-
-  await db.prepare('DELETE FROM admins WHERE id = ?').run(req.params.id);
-  res.json({ ok: true });
+  res.json(sessionSnapshot(req));
 });
 
 // ---------- Postulaciones (publico) ----------
@@ -258,7 +225,7 @@ async function notifyPayrollPaid(p) {
 // Si el admin tiene un departamento asignado, solo puede ver/gestionar
 // postulaciones de ese departamento (staff sin departamento asignado ve todo).
 function requireDepartmentAccess(req, res, row) {
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   if (scopedDept && row.department !== scopedDept) {
     res.status(404).json({ error: 'No encontrada' });
     return false;
@@ -268,7 +235,7 @@ function requireDepartmentAccess(req, res, row) {
 
 app.get('/api/applications', requireAuth, async (req, res) => {
   const { status, department } = req.query;
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const conditions = [];
   const params = [];
 
@@ -293,7 +260,7 @@ app.get('/api/applications', requireAuth, async (req, res) => {
 // "export.csv" como un id de postulación.
 app.get('/api/applications/export.csv', requireAuth, async (req, res) => {
   const { status, department } = req.query;
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const conditions = [];
   const params = [];
 
@@ -360,7 +327,7 @@ app.patch('/api/applications/:id', requireAuth, async (req, res) => {
   `).run(
     status || row.status,
     reviewNotes !== undefined ? reviewNotes : row.review_notes,
-    req.session.adminUser,
+    req.session.username,
     req.params.id,
   );
 
@@ -378,7 +345,7 @@ app.patch('/api/applications/:id', requireAuth, async (req, res) => {
       await db.prepare(`
         INSERT INTO employees (full_name, discord_info, department, rank_id, created_by)
         VALUES (?, ?, ?, ?, ?)
-      `).run(row.full_name, row.discord_info, row.department, rank.id, req.session.adminUser);
+      `).run(row.full_name, row.discord_info, row.department, rank.id, req.session.username);
     }
   }
 
@@ -397,7 +364,7 @@ app.delete('/api/applications/:id', requireAuth, async (req, res) => {
 // ---------- Rangos ----------
 
 app.get('/api/ranks', requireAuth, async (req, res) => {
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const rows = scopedDept
     ? await db.prepare('SELECT * FROM ranks WHERE department IS NULL OR department = ? ORDER BY level DESC').all(scopedDept)
     : await db.prepare('SELECT * FROM ranks ORDER BY level DESC').all();
@@ -424,7 +391,7 @@ app.patch('/api/ranks/:id', requireAuth, requireSuperAdmin, async (req, res) => 
 // los roles son una etiqueta organizativa aparte: un mismo empleado puede
 // tener rango "Médico General" y rol "RTD" al mismo tiempo.
 app.get('/api/employee-roles', requireAuth, async (req, res) => {
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const rows = scopedDept
     ? await db.prepare('SELECT * FROM employee_roles WHERE department IS NULL OR department = ? ORDER BY name ASC').all(scopedDept)
     : await db.prepare('SELECT * FROM employee_roles ORDER BY name ASC').all();
@@ -481,13 +448,13 @@ async function validateRoleForDepartment(roleId, department) {
 // login de fichaje en las respuestas de la API.
 const EMPLOYEE_COLUMNS = `
   e.id, e.full_name, e.phone, e.discord_info, e.department, e.rank_id, e.active,
-  e.created_by, e.created_at, e.role_id, e.username,
+  e.created_by, e.created_at, e.role_id, e.username, e.is_staff, e.is_superadmin, e.hr_access,
   (e.username IS NOT NULL) AS has_login
 `;
 
 app.get('/api/employees', requireAuth, async (req, res) => {
   const { department } = req.query;
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const conditions = [];
   const params = [];
 
@@ -522,7 +489,7 @@ async function validateRankForDepartment(rankId, department) {
 
 app.post('/api/employees', requireAuth, async (req, res) => {
   const { fullName, phone, discordInfo, rankId, roleId } = req.body || {};
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const department = scopedDept || req.body?.department;
 
   if (!fullName || !phone || !department || !rankId) {
@@ -546,7 +513,7 @@ app.post('/api/employees', requireAuth, async (req, res) => {
   const info = await db.prepare(`
     INSERT INTO employees (full_name, phone, discord_info, department, rank_id, role_id, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(fullName.trim(), phone.trim(), (discordInfo || '').trim() || null, department, rank.id, role_id, req.session.adminUser);
+  `).run(fullName.trim(), phone.trim(), (discordInfo || '').trim() || null, department, rank.id, role_id, req.session.username);
 
   res.status(201).json({ id: info.lastInsertRowid });
 });
@@ -558,7 +525,20 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
 
   const {
     fullName, phone, discordInfo, rankId, active, roleId, fichajeUsername, fichajePassword,
+    isStaff, isSuperadmin, hrAccess,
   } = req.body || {};
+
+  // Solo un superadmin puede tocar el nivel de acceso de otra cuenta
+  // (staff, superadmin o RRHH/Dirección) — nunca desde una cuenta scoped.
+  if ((isStaff !== undefined || isSuperadmin !== undefined || hrAccess !== undefined) && !req.session.isSuperadmin) {
+    return res.status(403).json({ error: 'Solo un superadmin puede cambiar el nivel de acceso' });
+  }
+  if (isSuperadmin === false && row.is_superadmin) {
+    const superadminCount = (await db.prepare('SELECT COUNT(*) AS c FROM employees WHERE is_superadmin = 1').get()).c;
+    if (superadminCount <= 1) {
+      return res.status(400).json({ error: 'No podés quitarle el acceso al único superadmin' });
+    }
+  }
 
   let rank_id = row.rank_id;
   if (rankId !== undefined) {
@@ -605,7 +585,8 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
 
   await db.prepare(`
     UPDATE employees
-    SET full_name = ?, phone = ?, discord_info = ?, rank_id = ?, active = ?, role_id = ?, username = ?, password_hash = ?
+    SET full_name = ?, phone = ?, discord_info = ?, rank_id = ?, active = ?, role_id = ?, username = ?, password_hash = ?,
+        is_staff = ?, is_superadmin = ?, hr_access = ?
     WHERE id = ?
   `).run(
     fullName !== undefined ? fullName.trim() : row.full_name,
@@ -616,6 +597,9 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
     role_id,
     username,
     password_hash,
+    isStaff !== undefined ? (isStaff ? 1 : 0) : row.is_staff,
+    isSuperadmin !== undefined ? (isSuperadmin ? 1 : 0) : row.is_superadmin,
+    hrAccess !== undefined ? (hrAccess ? 1 : 0) : row.hr_access,
     req.params.id,
   );
 
@@ -627,7 +611,18 @@ app.delete('/api/employees/:id', requireAuth, async (req, res) => {
   if (!row) return res.status(404).json({ error: 'No encontrado' });
   if (!requireDepartmentAccess(req, res, row)) return;
 
+  if (row.id === req.session.employeeId) {
+    return res.status(400).json({ error: 'No podés eliminar tu propia cuenta' });
+  }
+  if (row.is_superadmin) {
+    const superadminCount = (await db.prepare('SELECT COUNT(*) AS c FROM employees WHERE is_superadmin = 1').get()).c;
+    if (superadminCount <= 1) {
+      return res.status(400).json({ error: 'No podés eliminar al único superadmin' });
+    }
+  }
+
   await db.prepare('DELETE FROM payroll WHERE employee_id = ?').run(req.params.id);
+  await db.prepare('DELETE FROM attendance WHERE employee_id = ?').run(req.params.id);
   await db.prepare('DELETE FROM employees WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
@@ -646,7 +641,7 @@ async function getEmployeeWithAccess(req, res, employeeId) {
 
 app.get('/api/payroll', requireAuth, async (req, res) => {
   const { employeeId, paid, department } = req.query;
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const conditions = [];
   const params = [];
 
@@ -694,7 +689,7 @@ app.post('/api/payroll', requireAuth, async (req, res) => {
   const info = await db.prepare(`
     INSERT INTO payroll (employee_id, hours, hourly_rate, total_amount, period_label, created_by)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(employee.id, hoursNum, rate, total, (periodLabel || '').trim() || null, req.session.adminUser);
+  `).run(employee.id, hoursNum, rate, total, (periodLabel || '').trim() || null, req.session.username);
 
   res.status(201).json({ id: info.lastInsertRowid, total });
 });
@@ -726,7 +721,7 @@ app.patch('/api/payroll/:id', requireAuth, async (req, res) => {
         hourlyRate: row.hourly_rate,
         total: row.total_amount,
         periodLabel: row.period_label,
-        paidBy: req.session.adminUser,
+        paidBy: req.session.username,
         paidAt,
       });
     } catch (err) {
@@ -747,58 +742,16 @@ app.delete('/api/payroll/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Fichaje (acceso propio del empleado) ----------
+// ---------- Fichaje (acceso propio, con la misma cuenta unificada) ----------
 
-// Namespace de sesión totalmente aparte del de staff admin (adminUser):
-// un empleado ficha con su propia cuenta, no con la del panel de gestión.
-function requireEmployeeAuth(req, res, next) {
-  if (req.session && req.session.employeeId) return next();
-  return res.status(401).json({ error: 'No autenticado' });
-}
-
-app.post('/api/employee/login', async (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
-  }
-
-  const employee = await db.prepare('SELECT * FROM employees WHERE username = ?').get(username.trim());
-  if (!employee || !employee.password_hash || !bcrypt.compareSync(password, employee.password_hash)) {
-    return res.status(401).json({ error: 'Credenciales inválidas' });
-  }
-  if (!employee.active) {
-    return res.status(403).json({ error: 'Tu cuenta está inactiva. Consultá con tu departamento.' });
-  }
-
-  req.session.employeeId = employee.id;
-  req.session.employeeName = employee.full_name;
-  req.session.employeeDepartment = employee.department;
-  res.json({ ok: true, fullName: employee.full_name, department: employee.department });
-});
-
-app.post('/api/employee/logout', (req, res) => {
-  req.session.employeeId = null;
-  req.session.employeeName = null;
-  req.session.employeeDepartment = null;
-  res.json({ ok: true });
-});
-
-app.get('/api/employee/session', (req, res) => {
-  res.json({
-    authenticated: !!(req.session && req.session.employeeId),
-    fullName: req.session?.employeeName || null,
-    department: req.session?.employeeDepartment || null,
-  });
-});
-
-app.get('/api/employee/attendance/status', requireEmployeeAuth, async (req, res) => {
+app.get('/api/attendance/me/status', requireLoggedIn, async (req, res) => {
   const open = await db.prepare(
     'SELECT * FROM attendance WHERE employee_id = ? AND clock_out IS NULL ORDER BY clock_in DESC LIMIT 1',
   ).get(req.session.employeeId);
   res.json({ clockedIn: !!open, since: open ? open.clock_in : null });
 });
 
-app.post('/api/employee/attendance/clock', requireEmployeeAuth, async (req, res) => {
+app.post('/api/attendance/me/clock', requireLoggedIn, async (req, res) => {
   const open = await db.prepare(
     'SELECT * FROM attendance WHERE employee_id = ? AND clock_out IS NULL ORDER BY clock_in DESC LIMIT 1',
   ).get(req.session.employeeId);
@@ -809,29 +762,27 @@ app.post('/api/employee/attendance/clock', requireEmployeeAuth, async (req, res)
   }
 
   await db.prepare('INSERT INTO attendance (employee_id, department) VALUES (?, ?)')
-    .run(req.session.employeeId, req.session.employeeDepartment);
+    .run(req.session.employeeId, req.session.department);
   res.json({ ok: true, clockedIn: true });
 });
 
-app.get('/api/employee/attendance/history', requireEmployeeAuth, async (req, res) => {
+app.get('/api/attendance/me/history', requireLoggedIn, async (req, res) => {
   const rows = await db.prepare(
     'SELECT * FROM attendance WHERE employee_id = ? ORDER BY clock_in DESC LIMIT 60',
   ).all(req.session.employeeId);
   res.json(rows);
 });
 
-// ---------- Fichajes (vista de RRHH / Dirección sobre el personal) ----------
+// ---------- Fichajes (vista de RRHH / Dirección sobre todo el personal) ----------
 
-// Solo lo ve el staff sin departamento asignado (nivel SAED) o el staff
-// al que un superadmin le haya marcado el acceso de RRHH/Dirección.
 function requireAttendanceAccess(req, res, next) {
-  if (req.session && req.session.adminUser && (!req.session.adminDepartment || req.session.hrAccess)) return next();
+  if (req.session && req.session.employeeId && (req.session.isSuperadmin || req.session.hrAccess)) return next();
   return res.status(403).json({ error: 'No autorizado' });
 }
 
 app.get('/api/attendance', requireAuth, requireAttendanceAccess, async (req, res) => {
   const { department, employeeId, from, to } = req.query;
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const conditions = [];
   const params = [];
 
@@ -894,7 +845,7 @@ app.delete('/api/attendance/:id', requireAuth, requireAttendanceAccess, async (r
 
 app.get('/api/inventory', requireAuth, async (req, res) => {
   const { department } = req.query;
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const conditions = [];
   const params = [];
 
@@ -913,7 +864,7 @@ app.get('/api/inventory', requireAuth, async (req, res) => {
 
 app.post('/api/inventory', requireAuth, async (req, res) => {
   const { name, category, unit } = req.body || {};
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const department = scopedDept || req.body?.department;
 
   if (!name || !department) {
@@ -928,7 +879,7 @@ app.post('/api/inventory', requireAuth, async (req, res) => {
   const info = await db.prepare(`
     INSERT INTO inventory_items (department, name, category, unit, quantity, min_quantity, created_by)
     VALUES (?, ?, ?, ?, 0, ?, ?)
-  `).run(department, name.trim(), (category || '').trim() || null, (unit || 'unidad').trim(), minQty, req.session.adminUser);
+  `).run(department, name.trim(), (category || '').trim() || null, (unit || 'unidad').trim(), minQty, req.session.username);
 
   res.status(201).json({ id: info.lastInsertRowid });
 });
@@ -1009,7 +960,7 @@ app.post('/api/inventory/:id/movements', requireAuth, async (req, res) => {
   await db.prepare(`
     INSERT INTO inventory_movements (item_id, type, quantity, reason, case_id, created_by)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(item.id, type, qty, (reason || '').trim() || null, linkedCaseId, req.session.adminUser);
+  `).run(item.id, type, qty, (reason || '').trim() || null, linkedCaseId, req.session.username);
 
   await db.prepare(`UPDATE inventory_items SET quantity = ?, updated_at = datetime('now') WHERE id = ?`).run(newQuantity, item.id);
 
@@ -1020,7 +971,7 @@ app.post('/api/inventory/:id/movements', requireAuth, async (req, res) => {
 
 app.get('/api/cases', requireAuth, async (req, res) => {
   const { department, status, from, to, subject } = req.query;
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const conditions = [];
   const params = [];
 
@@ -1061,7 +1012,7 @@ app.get('/api/cases', requireAuth, async (req, res) => {
 
 app.post('/api/cases', requireAuth, async (req, res) => {
   const { subjectName, age, location, summary, treatment, responsibleEmployeeId } = req.body || {};
-  const scopedDept = req.session.adminDepartment;
+  const scopedDept = scopedDepartment(req);
   const department = scopedDept || req.body?.department;
 
   if (!subjectName || !summary || !department) {
@@ -1085,7 +1036,7 @@ app.post('/api/cases', requireAuth, async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     department, subjectName.trim(), age ? Number(age) : null, (location || '').trim() || null,
-    summary.trim(), (treatment || '').trim() || null, responsibleId, req.session.adminUser,
+    summary.trim(), (treatment || '').trim() || null, responsibleId, req.session.username,
   );
 
   res.status(201).json({ id: info.lastInsertRowid });
