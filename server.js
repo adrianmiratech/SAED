@@ -1435,6 +1435,34 @@ app.delete('/api/academy-classes/:id', requireAuth, requireAcademyAccess, async 
   res.json({ ok: true });
 });
 
+// Listado de evaluaciones de todos los cadetes en un solo lugar (no una
+// por una entrando a cada cadete), para poder revisarlas como una
+// sección propia de la Academia.
+app.get('/api/academy-evaluations', requireAuth, requireAcademyAccess, async (req, res) => {
+  const { department } = req.query;
+  const scopedDept = scopedDepartment(req);
+  const conditions = [];
+  const params = [];
+  if (scopedDept) {
+    conditions.push('c.department = ?');
+    params.push(scopedDept);
+  } else if (department && VALID_DEPARTMENTS.includes(department)) {
+    conditions.push('c.department = ?');
+    params.push(department);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const rows = await db.prepare(`
+    SELECT ev.*, co.name AS course_name, c.full_name AS cadet_name, c.department AS cadet_department
+    FROM academy_evaluations ev
+    JOIN cadets c ON c.id = ev.cadet_id
+    LEFT JOIN academy_courses co ON co.id = ev.course_id
+    ${where}
+    ORDER BY ev.created_at DESC
+  `).all(...params);
+  res.json(rows);
+});
+
 app.get('/api/cadets/:id/evaluations', requireAuth, requireAcademyAccess, async (req, res) => {
   const row = await getCadetWithAccess(req, res, req.params.id);
   if (!row) return;

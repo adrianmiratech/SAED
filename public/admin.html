@@ -417,6 +417,7 @@
             <div class="subtab-switch">
               <button class="subtab-btn academia-subtab-btn active" data-subtab="cadetes">🎓 Cadetes</button>
               <button class="subtab-btn academia-subtab-btn" data-subtab="cursos">📚 Cursos y clases</button>
+              <button class="subtab-btn academia-subtab-btn" data-subtab="evaluaciones">📝 Evaluaciones</button>
             </div>
 
             <div id="academia-cadetes-panel">
@@ -452,6 +453,63 @@
               <div id="courses-empty" class="empty-state" style="display:none">
                 <div class="empty-icon">📚</div>
                 <p>Todavía no hay cursos cargados.</p>
+              </div>
+            </div>
+
+            <div id="academia-evaluaciones-panel" style="display:none">
+              <div class="toolbar" id="academia-eval-dept-filter-row">
+                <button class="btn academia-eval-dept-filter-btn active" data-department="">Todos los departamentos</button>
+                <button class="btn academia-eval-dept-filter-btn" data-department="sams">SAMS</button>
+                <button class="btn academia-eval-dept-filter-btn" data-department="safd">SAFD</button>
+              </div>
+
+              <h3 class="modal-section-title" style="margin-top:0; padding-top:0; border-top:none;">Registrar evaluación</h3>
+              <div class="row">
+                <div>
+                  <label for="evaluation-cadet-select">Cadete</label>
+                  <select id="evaluation-cadet-select"></select>
+                </div>
+                <div>
+                  <label for="evaluation-title">Título</label>
+                  <input type="text" id="evaluation-title" placeholder="Ej: Examen final de teoría" />
+                </div>
+              </div>
+              <div class="row">
+                <div>
+                  <label for="evaluation-course">Curso <span class="hint">(opcional)</span></label>
+                  <select id="evaluation-course"><option value="">Sin curso asociado</option></select>
+                </div>
+                <div>
+                  <label for="evaluation-passed">Resultado</label>
+                  <select id="evaluation-passed">
+                    <option value="">Sin definir</option>
+                    <option value="1">Aprobado</option>
+                    <option value="0">Reprobado</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row">
+                <div>
+                  <label for="evaluation-score">Puntaje <span class="hint">(opcional)</span></label>
+                  <input type="number" id="evaluation-score" step="0.01" />
+                </div>
+                <div>
+                  <label for="evaluation-max-score">Puntaje máximo</label>
+                  <input type="number" id="evaluation-max-score" step="0.01" value="100" />
+                </div>
+              </div>
+              <label for="evaluation-notes">Notas <span class="hint">(opcional)</span></label>
+              <textarea id="evaluation-notes"></textarea>
+              <div class="submit-row">
+                <button type="button" id="evaluation-add-btn" class="btn-primary btn-sm">Registrar evaluación</button>
+              </div>
+              <div id="evaluation-message" class="message"></div>
+
+              <h3 class="modal-section-title">Evaluaciones registradas</h3>
+              <div id="evaluations-list" class="staff-list"></div>
+              <div id="evaluations-empty" class="empty-state" style="display:none">
+                <div class="empty-icon">📝</div>
+                <p>Todavía no hay evaluaciones registradas.</p>
               </div>
             </div>
           </div>
@@ -917,43 +975,6 @@
           <button type="button" id="cadet-graduate-btn" class="btn-primary btn-sm">Graduar y crear cuenta de empleado</button>
         </div>
         <div id="cadet-graduate-message" class="message"></div>
-      </div>
-
-      <div id="cadet-evaluations-section" style="display:none">
-        <h3 class="modal-section-title">Evaluaciones</h3>
-        <div class="row">
-          <div>
-            <label for="evaluation-title">Título</label>
-            <input type="text" id="evaluation-title" placeholder="Ej: Examen final de teoría" />
-          </div>
-          <div>
-            <label for="evaluation-course">Curso <span class="hint">(opcional)</span></label>
-            <select id="evaluation-course"><option value="">Sin curso asociado</option></select>
-          </div>
-        </div>
-        <div class="row">
-          <div>
-            <label for="evaluation-score">Puntaje <span class="hint">(opcional)</span></label>
-            <input type="number" id="evaluation-score" step="0.01" />
-          </div>
-          <div>
-            <label for="evaluation-max-score">Puntaje máximo</label>
-            <input type="number" id="evaluation-max-score" step="0.01" value="100" />
-          </div>
-        </div>
-        <label for="evaluation-passed">Resultado</label>
-        <select id="evaluation-passed">
-          <option value="">Sin definir</option>
-          <option value="1">Aprobado</option>
-          <option value="0">Reprobado</option>
-        </select>
-        <label for="evaluation-notes">Notas <span class="hint">(opcional)</span></label>
-        <textarea id="evaluation-notes"></textarea>
-        <div class="submit-row">
-          <button type="button" id="evaluation-add-btn" class="btn-primary btn-sm">Registrar evaluación</button>
-        </div>
-        <div id="evaluation-message" class="message"></div>
-        <div id="evaluations-list" class="staff-list"></div>
       </div>
 
       <div id="cadet-notes-section" style="display:none">

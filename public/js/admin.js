@@ -109,6 +109,9 @@ async function checkSession() {
 
     document.getElementById('academia-dept-filter-row').style.display = 'none';
     currentCadetsDeptFilter = scopedDepartment;
+
+    document.getElementById('academia-eval-dept-filter-row').style.display = 'none';
+    currentEvalDeptFilter = scopedDepartment;
   }
   if (isSuperadmin) {
     // Solo el superadmin define tarifas de pago por rango y administra roles.
@@ -2505,10 +2508,12 @@ const cadetStatusSelect = document.getElementById('cadet-status');
 const cadetFormSubmit = document.getElementById('cadet-form-submit');
 const cadetDeleteBtn = document.getElementById('cadet-delete-btn');
 const cadetGraduateSection = document.getElementById('cadet-graduate-section');
-const cadetEvaluationsSection = document.getElementById('cadet-evaluations-section');
 const cadetNotesSection = document.getElementById('cadet-notes-section');
-const evaluationsListEl = document.getElementById('evaluations-list');
 const cadetNotesListEl = document.getElementById('cadet-notes-list');
+const evaluationsListEl = document.getElementById('evaluations-list');
+const evaluationsEmptyEl = document.getElementById('evaluations-empty');
+const evaluationCadetSelect = document.getElementById('evaluation-cadet-select');
+let currentEvalDeptFilter = '';
 const coursesListEl = document.getElementById('courses-list');
 const coursesEmptyEl = document.getElementById('courses-empty');
 const courseModalBackdrop = document.getElementById('course-modal-backdrop');
@@ -2522,13 +2527,21 @@ const courseClassesSection = document.getElementById('course-classes-section');
 const classesListEl = document.getElementById('classes-list');
 
 document.querySelectorAll('.academia-subtab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     document.querySelectorAll('.academia-subtab-btn').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
-    const isCadetes = btn.dataset.subtab === 'cadetes';
-    document.getElementById('academia-cadetes-panel').style.display = isCadetes ? 'block' : 'none';
-    document.getElementById('academia-cursos-panel').style.display = isCadetes ? 'none' : 'block';
-    if (!isCadetes && academyCourses.length === 0) loadAcademyCourses();
+    const subtab = btn.dataset.subtab;
+    document.getElementById('academia-cadetes-panel').style.display = subtab === 'cadetes' ? 'block' : 'none';
+    document.getElementById('academia-cursos-panel').style.display = subtab === 'cursos' ? 'block' : 'none';
+    document.getElementById('academia-evaluaciones-panel').style.display = subtab === 'evaluaciones' ? 'block' : 'none';
+
+    if (subtab === 'cursos' && academyCourses.length === 0) await loadAcademyCourses();
+    if (subtab === 'evaluaciones') {
+      if (cadets.length === 0) await loadCadets();
+      if (academyCourses.length === 0) await loadAcademyCourses();
+      populateEvaluationCadetSelect();
+      await loadAllEvaluations();
+    }
   });
 });
 
@@ -2603,7 +2616,6 @@ function openNewCadetModal() {
   cadetDeleteBtn.style.display = 'none';
   cadetStatusField.style.display = 'none';
   cadetGraduateSection.style.display = 'none';
-  cadetEvaluationsSection.style.display = 'none';
   cadetNotesSection.style.display = 'none';
   cadetDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
   cadetDepartmentSelect.value = scopedDepartment || currentCadetsDeptFilter || 'sams';
@@ -2625,7 +2637,6 @@ async function openCadetModal(id) {
   cadetDeleteBtn.style.display = 'inline-flex';
   cadetStatusField.style.display = 'block';
   cadetDepartmentField.style.display = 'none';
-  cadetEvaluationsSection.style.display = 'block';
   cadetNotesSection.style.display = 'block';
 
   document.getElementById('cadet-fullname').value = c.full_name;
@@ -2646,13 +2657,11 @@ async function openCadetModal(id) {
     graduateBtn.style.display = 'inline-flex';
   }
 
-  populateEvaluationCourseSelect(c.department);
-  evaluationsListEl.innerHTML = '<div class="staff-empty">Cargando…</div>';
   cadetNotesListEl.innerHTML = '<div class="staff-empty">Cargando…</div>';
 
   cadetModalBackdrop.classList.add('open');
 
-  await Promise.all([loadEvaluations(id), loadCadetNotes(id)]);
+  await loadCadetNotes(id);
 }
 
 function closeCadetModal() {
@@ -2763,18 +2772,35 @@ document.querySelectorAll('.academia-status-filter-btn').forEach((btn) => {
   });
 });
 
-// ---- Evaluaciones ----
+// ---- Evaluaciones (sección propia de la Academia, no dentro del modal
+// de cada cadete: se ven y se cargan todas juntas desde acá) ----
+
+function populateEvaluationCadetSelect() {
+  const list = currentEvalDeptFilter ? cadets.filter((c) => c.department === currentEvalDeptFilter) : cadets;
+  evaluationCadetSelect.innerHTML = list.length === 0
+    ? '<option value="">No hay cadetes cargados</option>'
+    : list.map((c) => `<option value="${c.id}" data-department="${c.department}">${escapeHtml(c.full_name)} (${departmentLabel(c.department)})</option>`).join('');
+  populateEvaluationCourseSelect(list[0] ? list[0].department : null);
+}
 
 function populateEvaluationCourseSelect(department) {
   const select = document.getElementById('evaluation-course');
-  const list = academyCourses.filter((c) => !c.department || c.department === department);
+  const list = department ? academyCourses.filter((c) => !c.department || c.department === department) : academyCourses;
   select.innerHTML = '<option value="">Sin curso asociado</option>' + list.map((c) => (
     `<option value="${c.id}">${escapeHtml(c.name)}</option>`
   )).join('');
 }
 
-async function loadEvaluations(cadetId) {
-  const res = await fetch(`/api/cadets/${cadetId}/evaluations`);
+evaluationCadetSelect.addEventListener('change', () => {
+  const opt = evaluationCadetSelect.selectedOptions[0];
+  populateEvaluationCourseSelect(opt ? opt.dataset.department : null);
+});
+
+async function loadAllEvaluations() {
+  const params = new URLSearchParams();
+  if (currentEvalDeptFilter) params.set('department', currentEvalDeptFilter);
+  const query = params.toString();
+  const res = await fetch(query ? `/api/academy-evaluations?${query}` : '/api/academy-evaluations');
   if (!res.ok) return;
   const rows = await res.json();
   renderEvaluations(rows);
@@ -2782,13 +2808,16 @@ async function loadEvaluations(cadetId) {
 
 function renderEvaluations(rows) {
   if (rows.length === 0) {
-    evaluationsListEl.innerHTML = '<div class="staff-empty">Todavía no hay evaluaciones registradas.</div>';
+    evaluationsListEl.innerHTML = '';
+    evaluationsEmptyEl.style.display = 'block';
     return;
   }
+  evaluationsEmptyEl.style.display = 'none';
   evaluationsListEl.innerHTML = rows.map((ev) => `
     <div class="staff-row">
       <div class="staff-meta">
         <span class="staff-username">${escapeHtml(ev.title)}</span>
+        <span class="dept-badge dept-${ev.cadet_department}">${escapeHtml(ev.cadet_name)}</span>
         ${ev.course_name ? `<span class="muted-link">${escapeHtml(ev.course_name)}</span>` : ''}
         ${ev.score !== null && ev.score !== undefined ? `<span class="status-pill status-pendiente">${ev.score}/${ev.max_score}</span>` : ''}
         ${ev.passed === 1 ? '<span class="status-pill status-aprobado">Aprobado</span>' : ev.passed === 0 ? '<span class="status-pill status-rechazado">Reprobado</span>' : ''}
@@ -2802,17 +2831,33 @@ function renderEvaluations(rows) {
     btn.addEventListener('click', async () => {
       if (!confirm('¿Eliminar esta evaluación?')) return;
       await fetch(`/api/academy-evaluations/${btn.dataset.deleteEvaluation}`, { method: 'DELETE' });
-      await loadEvaluations(currentCadetId);
+      await loadAllEvaluations();
       showToast('Evaluación eliminada.', 'danger');
     });
   });
 }
 
+document.querySelectorAll('.academia-eval-dept-filter-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.academia-eval-dept-filter-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentEvalDeptFilter = btn.dataset.department;
+    populateEvaluationCadetSelect();
+    loadAllEvaluations();
+  });
+});
+
 document.getElementById('evaluation-add-btn').addEventListener('click', async () => {
-  if (!currentCadetId) return;
+  const cadetId = evaluationCadetSelect.value;
   const msg = document.getElementById('evaluation-message');
   msg.className = 'message';
   msg.textContent = '';
+
+  if (!cadetId) {
+    msg.className = 'message error';
+    msg.textContent = 'Elegí un cadete.';
+    return;
+  }
 
   const title = document.getElementById('evaluation-title').value.trim();
   const courseId = document.getElementById('evaluation-course').value || undefined;
@@ -2828,7 +2873,7 @@ document.getElementById('evaluation-add-btn').addEventListener('click', async ()
   }
 
   try {
-    const res = await fetch(`/api/cadets/${currentCadetId}/evaluations`, {
+    const res = await fetch(`/api/cadets/${cadetId}/evaluations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2843,7 +2888,7 @@ document.getElementById('evaluation-add-btn').addEventListener('click', async ()
     document.getElementById('evaluation-score').value = '';
     document.getElementById('evaluation-notes').value = '';
     document.getElementById('evaluation-passed').value = '';
-    await loadEvaluations(currentCadetId);
+    await loadAllEvaluations();
     showToast('Evaluación registrada.');
   } catch (err) {
     msg.className = 'message error';

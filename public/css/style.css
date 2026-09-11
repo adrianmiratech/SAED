@@ -569,6 +569,10 @@ button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); out
   flex-wrap: wrap;
 }
 
+/* Chips de filtro (departamento / estado) en toda la app: fondo
+   transparente + borde tenue cuando no están activos, y un relleno
+   suave con el color de acento (no un fill sólido y plano) cuando sí,
+   en línea con el resto de "pills" de la interfaz (status-pill). */
 .filter-btn,
 .dept-filter-btn,
 .personal-dept-filter-btn,
@@ -578,9 +582,26 @@ button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); out
 .cases-status-filter-btn,
 .academia-dept-filter-btn,
 .academia-status-filter-btn {
-  background: var(--panel-alt);
+  background: transparent;
   border: 1px solid var(--border);
   color: var(--text-muted);
+  padding: 8px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+}
+.filter-btn:hover:not(.active),
+.dept-filter-btn:hover:not(.active),
+.personal-dept-filter-btn:hover:not(.active),
+.attendance-dept-filter-btn:hover:not(.active),
+.inventory-dept-filter-btn:hover:not(.active),
+.cases-dept-filter-btn:hover:not(.active),
+.cases-status-filter-btn:hover:not(.active),
+.academia-dept-filter-btn:hover:not(.active),
+.academia-status-filter-btn:hover:not(.active) {
+  border-color: var(--text-muted);
+  color: var(--text);
+  transform: none;
 }
 .filter-btn.active,
 .dept-filter-btn.active,
@@ -591,9 +612,9 @@ button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); out
 .cases-status-filter-btn.active,
 .academia-dept-filter-btn.active,
 .academia-status-filter-btn.active {
-  background: var(--accent);
+  background: var(--accent-soft);
   border-color: var(--accent);
-  color: white;
+  color: var(--accent);
 }
 
 .date-range-label {
