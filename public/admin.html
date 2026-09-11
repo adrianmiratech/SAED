@@ -401,7 +401,7 @@
           <div class="stats-grid" id="academia-stats-grid">
             <div class="stat-card">
               <div class="stat-value" id="acstat-total">–</div>
-              <div class="stat-label">Cadetes</div>
+              <div class="stat-label">Estudiantes</div>
             </div>
             <div class="stat-card stat-pendiente">
               <div class="stat-value" id="acstat-activos">–</div>
@@ -415,7 +415,7 @@
 
           <div class="card">
             <div class="subtab-switch">
-              <button class="subtab-btn academia-subtab-btn active" data-subtab="cadetes">🎓 Cadetes</button>
+              <button class="subtab-btn academia-subtab-btn active" data-subtab="cadetes">🎓 Estudiantes</button>
               <button class="subtab-btn academia-subtab-btn" data-subtab="cursos">📚 Cursos y clases</button>
               <button class="subtab-btn academia-subtab-btn" data-subtab="evaluaciones">📝 Evaluaciones</button>
             </div>
@@ -433,14 +433,14 @@
                 <button class="btn academia-status-filter-btn" data-status="expulsado">Expulsados</button>
                 <button class="btn academia-status-filter-btn" data-status="baja">Baja</button>
                 <span style="flex:1"></span>
-                <input type="text" id="cadets-search-input" class="search-input" placeholder="Buscar cadete..." />
-                <button id="new-cadet-btn" class="btn-primary btn-sm">+ Nuevo cadete</button>
+                <input type="text" id="cadets-search-input" class="search-input" placeholder="Buscar estudiante..." />
+                <button id="new-cadet-btn" class="btn-primary btn-sm">+ Nuevo estudiante</button>
               </div>
 
               <div id="cadets-list" class="staff-list"></div>
               <div id="cadets-empty" class="empty-state" style="display:none">
                 <div class="empty-icon">🎓</div>
-                <p>No hay cadetes cargados en esta categoría todavía. Se suman automáticamente cuando aprobás una postulación.</p>
+                <p>No hay estudiantes cargados en esta categoría todavía. Se suman automáticamente cuando aprobás una postulación.</p>
               </div>
             </div>
 
@@ -466,7 +466,7 @@
               <h3 class="modal-section-title" style="margin-top:0; padding-top:0; border-top:none;">Registrar evaluación</h3>
               <div class="row">
                 <div>
-                  <label for="evaluation-cadet-select">Cadete</label>
+                  <label for="evaluation-cadet-select">Estudiante</label>
                   <select id="evaluation-cadet-select"></select>
                 </div>
                 <div>
@@ -726,7 +726,7 @@
         </button>
       </div>
 
-      <p class="subtitle" style="margin:0 0 14px;">Al aprobar, el postulante entra a la Academia como cadete. El rango se le asigna recién cuando se gradúa.</p>
+      <p class="subtitle" style="margin:0 0 14px;">Al aprobar, el postulante entra a la Academia como estudiante. El rango se le asigna recién cuando se gradúa.</p>
 
       <div class="review-secondary">
         <button class="btn btn-info btn-sm" data-action="en_revision">En revisión</button>
@@ -963,10 +963,29 @@
         <textarea id="cadet-notes"></textarea>
 
         <div class="submit-row">
-          <button type="submit" class="btn-primary" id="cadet-form-submit">Registrar cadete</button>
+          <button type="submit" class="btn-primary" id="cadet-form-submit">Registrar estudiante</button>
         </div>
         <div id="cadet-message" class="message"></div>
       </form>
+
+      <div id="cadet-access-section" style="display:none">
+        <h3 class="modal-section-title">Cuenta de acceso al portal</h3>
+        <p class="subtitle" id="cadet-access-status">Este estudiante todavía no tiene cuenta para entrar al portal.</p>
+        <div class="row">
+          <div>
+            <label for="cadet-access-username">Usuario</label>
+            <input type="text" id="cadet-access-username" autocomplete="off" placeholder="Ej: jperez" />
+          </div>
+          <div>
+            <label for="cadet-access-password">Contraseña <span class="hint">(vacío = no cambiarla)</span></label>
+            <input type="password" id="cadet-access-password" autocomplete="new-password" minlength="6" />
+          </div>
+        </div>
+        <div class="submit-row">
+          <button type="button" id="cadet-access-save-btn" class="btn-primary btn-sm">Guardar acceso</button>
+        </div>
+        <div id="cadet-access-message" class="message"></div>
+      </div>
 
       <div id="cadet-graduate-section" style="display:none">
         <h3 class="modal-section-title">Cuenta de empleado</h3>
@@ -989,7 +1008,7 @@
 
       <div class="modal-actions">
         <button class="btn btn-ghost btn-sm" id="cadet-modal-close">Cerrar</button>
-        <button class="btn btn-danger btn-sm" id="cadet-delete-btn" style="display:none">Eliminar cadete</button>
+        <button class="btn btn-danger btn-sm" id="cadet-delete-btn" style="display:none">Eliminar estudiante</button>
       </div>
     </div>
   </div>
@@ -1028,6 +1047,22 @@
         </div>
         <div id="course-message" class="message"></div>
       </form>
+
+      <div id="course-materials-section" style="display:none">
+        <h3 class="modal-section-title">Materiales del curso</h3>
+        <p class="subtitle" style="margin:0 0 10px;">Subí presentaciones, PDFs u otros documentos para que los estudiantes los vean desde su portal. Máximo 4MB por archivo.</p>
+        <div class="row">
+          <div>
+            <label for="material-file-input">Archivo</label>
+            <input type="file" id="material-file-input" />
+          </div>
+        </div>
+        <div class="submit-row">
+          <button type="button" id="material-upload-btn" class="btn-primary btn-sm">Subir material</button>
+        </div>
+        <div id="material-message" class="message"></div>
+        <div id="materials-list" class="staff-list"></div>
+      </div>
 
       <div id="course-classes-section" style="display:none">
         <h3 class="modal-section-title">Clases programadas</h3>

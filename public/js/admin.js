@@ -30,7 +30,7 @@ const PAGE_TITLES = {
   fichajes: ['Fichajes', 'Control de entrada y salida del personal.'],
   inventario: ['Inventario', 'Stock de insumos y medicamentos de SAMS y SAFD.'],
   atenciones: ['Atenciones', 'Fichas de pacientes e informes de intervención.'],
-  academia: ['Academia', 'Cadetes, cursos y evaluaciones de la formación del SAED.'],
+  academia: ['Academia', 'Estudiantes, cursos y evaluaciones de la formación del SAED.'],
 };
 const CADET_STATUS_LABELS = { activo: 'Activo', graduado: 'Graduado', expulsado: 'Expulsado', baja: 'Baja' };
 const CADET_STATUS_PILL_CLASS = { activo: 'status-en_revision', graduado: 'status-aprobado', expulsado: 'status-rechazado', baja: 'status-baja' };
@@ -270,7 +270,7 @@ async function updateStatus(status, btn) {
     if (!res.ok) throw new Error(data.error || 'No se pudo actualizar la postulación');
     closeModal();
     await loadApplications();
-    showToast(status === 'aprobado' ? 'Postulación aprobada y sumada a la Academia como cadete.' : 'Postulación actualizada.');
+    showToast(status === 'aprobado' ? 'Postulación aprobada y sumada a la Academia como estudiante.' : 'Postulación actualizada.');
   } catch (err) {
     showToast(err.message, 'danger');
   } finally {
@@ -2507,6 +2507,7 @@ const cadetStatusField = document.getElementById('cadet-status-field');
 const cadetStatusSelect = document.getElementById('cadet-status');
 const cadetFormSubmit = document.getElementById('cadet-form-submit');
 const cadetDeleteBtn = document.getElementById('cadet-delete-btn');
+const cadetAccessSection = document.getElementById('cadet-access-section');
 const cadetGraduateSection = document.getElementById('cadet-graduate-section');
 const cadetNotesSection = document.getElementById('cadet-notes-section');
 const cadetNotesListEl = document.getElementById('cadet-notes-list');
@@ -2525,6 +2526,8 @@ const courseDeleteBtn = document.getElementById('course-delete-btn');
 const courseActiveField = document.getElementById('course-active-field');
 const courseClassesSection = document.getElementById('course-classes-section');
 const classesListEl = document.getElementById('classes-list');
+const courseMaterialsSection = document.getElementById('course-materials-section');
+const materialsListEl = document.getElementById('materials-list');
 
 document.querySelectorAll('.academia-subtab-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
@@ -2602,19 +2605,24 @@ function resetCadetForm() {
   cadetForm.reset();
   cadetMessage.className = 'message';
   cadetMessage.textContent = '';
+  document.getElementById('cadet-access-username').value = '';
+  document.getElementById('cadet-access-password').value = '';
+  document.getElementById('cadet-access-message').className = 'message';
+  document.getElementById('cadet-access-message').textContent = '';
 }
 
 function openNewCadetModal() {
   currentCadetId = null;
   resetCadetForm();
 
-  document.getElementById('cadet-modal-name').textContent = 'Nuevo cadete';
+  document.getElementById('cadet-modal-name').textContent = 'Nuevo estudiante';
   document.getElementById('cadet-modal-sub').textContent = 'Registrar un nuevo ingreso a la academia.';
   document.getElementById('cadet-modal-department').innerHTML = '';
   document.getElementById('cadet-modal-status').innerHTML = '';
-  cadetFormSubmit.textContent = 'Registrar cadete';
+  cadetFormSubmit.textContent = 'Registrar estudiante';
   cadetDeleteBtn.style.display = 'none';
   cadetStatusField.style.display = 'none';
+  cadetAccessSection.style.display = 'none';
   cadetGraduateSection.style.display = 'none';
   cadetNotesSection.style.display = 'none';
   cadetDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
@@ -2637,6 +2645,7 @@ async function openCadetModal(id) {
   cadetDeleteBtn.style.display = 'inline-flex';
   cadetStatusField.style.display = 'block';
   cadetDepartmentField.style.display = 'none';
+  cadetAccessSection.style.display = 'block';
   cadetNotesSection.style.display = 'block';
 
   document.getElementById('cadet-fullname').value = c.full_name;
@@ -2644,6 +2653,11 @@ async function openCadetModal(id) {
   document.getElementById('cadet-discord').value = c.discord_info || '';
   document.getElementById('cadet-notes').value = c.notes || '';
   cadetStatusSelect.value = c.status;
+
+  document.getElementById('cadet-access-status').textContent = c.username
+    ? `Ya puede entrar al portal con el usuario "${c.username}".`
+    : 'Este estudiante todavía no tiene cuenta para entrar al portal.';
+  document.getElementById('cadet-access-username').value = c.username || '';
 
   cadetGraduateSection.style.display = 'block';
   document.getElementById('cadet-graduate-message').className = 'message';
@@ -2698,9 +2712,9 @@ cadetForm.addEventListener('submit', async (e) => {
       body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el cadete');
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el estudiante');
 
-    showToast(isEdit ? 'Cadete actualizado.' : 'Cadete registrado.');
+    showToast(isEdit ? 'Estudiante actualizado.' : 'Estudiante registrado.');
     await loadCadets();
     if (isEdit) {
       await openCadetModal(currentCadetId);
@@ -2715,6 +2729,37 @@ cadetForm.addEventListener('submit', async (e) => {
   }
 });
 
+document.getElementById('cadet-access-save-btn').addEventListener('click', async () => {
+  if (!currentCadetId) return;
+  const msg = document.getElementById('cadet-access-message');
+  msg.className = 'message';
+  msg.textContent = '';
+
+  const studentUsername = document.getElementById('cadet-access-username').value.trim();
+  const studentPassword = document.getElementById('cadet-access-password').value;
+
+  try {
+    const res = await fetch(`/api/cadets/${currentCadetId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentUsername, studentPassword: studentPassword || undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo guardar el acceso');
+
+    document.getElementById('cadet-access-password').value = '';
+    await loadCadets();
+    const updated = cadets.find((x) => x.id === currentCadetId);
+    document.getElementById('cadet-access-status').textContent = updated && updated.username
+      ? `Ya puede entrar al portal con el usuario "${updated.username}".`
+      : 'Este estudiante todavía no tiene cuenta para entrar al portal.';
+    showToast('Cuenta de acceso actualizada.');
+  } catch (err) {
+    msg.className = 'message error';
+    msg.textContent = err.message;
+  }
+});
+
 document.getElementById('cadet-graduate-btn').addEventListener('click', async () => {
   if (!currentCadetId) return;
   const msg = document.getElementById('cadet-graduate-message');
@@ -2723,9 +2768,9 @@ document.getElementById('cadet-graduate-btn').addEventListener('click', async ()
   try {
     const res = await fetch(`/api/cadets/${currentCadetId}/graduate`, { method: 'POST' });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'No se pudo graduar al cadete');
+    if (!res.ok) throw new Error(data.error || 'No se pudo graduar al estudiante');
 
-    showToast('Cadete graduado. Se creó su cuenta de empleado.');
+    showToast('Estudiante graduado. Se creó su cuenta de empleado.');
     await loadCadets();
     await openCadetModal(currentCadetId);
   } catch (err) {
@@ -2736,11 +2781,11 @@ document.getElementById('cadet-graduate-btn').addEventListener('click', async ()
 
 cadetDeleteBtn.addEventListener('click', async () => {
   if (!currentCadetId) return;
-  if (!confirm('¿Eliminar este cadete y todo su historial de formación?')) return;
+  if (!confirm('¿Eliminar este estudiante y todo su historial de formación?')) return;
   await fetch(`/api/cadets/${currentCadetId}`, { method: 'DELETE' });
   closeCadetModal();
   await loadCadets();
-  showToast('Cadete eliminado.', 'danger');
+  showToast('Estudiante eliminado.', 'danger');
 });
 
 document.getElementById('new-cadet-btn').addEventListener('click', openNewCadetModal);
@@ -2778,7 +2823,7 @@ document.querySelectorAll('.academia-status-filter-btn').forEach((btn) => {
 function populateEvaluationCadetSelect() {
   const list = currentEvalDeptFilter ? cadets.filter((c) => c.department === currentEvalDeptFilter) : cadets;
   evaluationCadetSelect.innerHTML = list.length === 0
-    ? '<option value="">No hay cadetes cargados</option>'
+    ? '<option value="">No hay estudiantes cargados</option>'
     : list.map((c) => `<option value="${c.id}" data-department="${c.department}">${escapeHtml(c.full_name)} (${departmentLabel(c.department)})</option>`).join('');
   populateEvaluationCourseSelect(list[0] ? list[0].department : null);
 }
@@ -2855,7 +2900,7 @@ document.getElementById('evaluation-add-btn').addEventListener('click', async ()
 
   if (!cadetId) {
     msg.className = 'message error';
-    msg.textContent = 'Elegí un cadete.';
+    msg.textContent = 'Elegí un estudiante.';
     return;
   }
 
@@ -3010,6 +3055,7 @@ function openNewCourseModal() {
   courseDeleteBtn.style.display = 'none';
   courseActiveField.style.display = 'none';
   courseClassesSection.style.display = 'none';
+  courseMaterialsSection.style.display = 'none';
   courseDepartmentField.style.display = scopedDepartment ? 'none' : 'block';
 
   courseModalBackdrop.classList.add('open');
@@ -3028,6 +3074,7 @@ async function openCourseModal(id) {
   courseActiveField.style.display = 'flex';
   courseDepartmentField.style.display = 'none';
   courseClassesSection.style.display = 'block';
+  courseMaterialsSection.style.display = 'block';
 
   document.getElementById('course-name').value = c.name;
   document.getElementById('course-description').value = c.description || '';
@@ -3035,9 +3082,13 @@ async function openCourseModal(id) {
 
   populateClassInstructorSelect(c.department);
   classesListEl.innerHTML = '<div class="staff-empty">Cargando…</div>';
+  materialsListEl.innerHTML = '<div class="staff-empty">Cargando…</div>';
+  document.getElementById('material-file-input').value = '';
+  document.getElementById('material-message').className = 'message';
+  document.getElementById('material-message').textContent = '';
   courseModalBackdrop.classList.add('open');
 
-  await loadClasses(id);
+  await Promise.all([loadClasses(id), loadMaterials(id)]);
 }
 
 function closeCourseModal() {
@@ -3179,6 +3230,87 @@ document.getElementById('class-add-btn').addEventListener('click', async () => {
   } catch (err) {
     msg.className = 'message error';
     msg.textContent = err.message;
+  }
+});
+
+// ---- Materiales del curso (presentaciones, PDFs, etc.) ----
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function loadMaterials(courseId) {
+  const res = await fetch(`/api/academy-courses/${courseId}/materials`);
+  if (!res.ok) return;
+  const rows = await res.json();
+  renderMaterials(rows);
+}
+
+function renderMaterials(rows) {
+  if (rows.length === 0) {
+    materialsListEl.innerHTML = '<div class="staff-empty">Todavía no hay materiales cargados para este curso.</div>';
+    return;
+  }
+  materialsListEl.innerHTML = rows.map((m) => `
+    <div class="staff-row">
+      <div class="staff-meta">
+        <span class="staff-username">📄 ${escapeHtml(m.file_name)}</span>
+        <span class="muted-link">${formatBytes(m.file_size)} · ${formatDate(m.created_at)}</span>
+      </div>
+      <a class="btn btn-ghost btn-sm" href="/api/academy-materials/${m.id}/download">Descargar</a>
+      <button class="btn btn-danger btn-sm" data-delete-material="${m.id}">Eliminar</button>
+    </div>
+  `).join('');
+
+  materialsListEl.querySelectorAll('[data-delete-material]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este material?')) return;
+      await fetch(`/api/academy-materials/${btn.dataset.deleteMaterial}`, { method: 'DELETE' });
+      await loadMaterials(currentCourseId);
+      showToast('Material eliminado.', 'danger');
+    });
+  });
+}
+
+document.getElementById('material-upload-btn').addEventListener('click', async () => {
+  if (!currentCourseId) return;
+  const msg = document.getElementById('material-message');
+  msg.className = 'message';
+  msg.textContent = '';
+
+  const fileInput = document.getElementById('material-file-input');
+  const file = fileInput.files[0];
+  if (!file) {
+    msg.className = 'message error';
+    msg.textContent = 'Elegí un archivo primero.';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const uploadBtn = document.getElementById('material-upload-btn');
+  uploadBtn.disabled = true;
+  uploadBtn.textContent = 'Subiendo...';
+  try {
+    const res = await fetch(`/api/academy-courses/${currentCourseId}/materials`, {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo subir el archivo');
+
+    fileInput.value = '';
+    await loadMaterials(currentCourseId);
+    showToast('Material subido.');
+  } catch (err) {
+    msg.className = 'message error';
+    msg.textContent = err.message;
+  } finally {
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = 'Subir material';
   }
 });
 

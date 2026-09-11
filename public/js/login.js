@@ -21,7 +21,7 @@ form.addEventListener('submit', async (e) => {
 
     if (!res.ok) throw new Error(data.error || 'No se pudo iniciar sesión');
 
-    window.location.href = '/admin.html';
+    window.location.href = data.role === 'cadet' ? '/student.html' : '/admin.html';
   } catch (err) {
     messageEl.className = 'message error';
     messageEl.textContent = err.message;

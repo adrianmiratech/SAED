@@ -4,7 +4,19 @@ const express = require('express');
 const cookieSession = require('cookie-session');
 const bcrypt = require('bcryptjs');
 const PDFDocument = require('pdfkit');
+const multer = require('multer');
 const db = require('./db');
+
+// Los materiales de curso (presentaciones, PDFs, etc.) se guardan como
+// base64 directo en la base (Turso), no en el filesystem: en Vercel las
+// funciones serverless no tienen disco persistente. El límite de 4MB
+// queda por debajo del tope de tamaño de request de las funciones
+// serverless de Vercel (4.5MB), para no cortarse antes de llegar acá.
+const MATERIAL_MAX_BYTES = 4 * 1024 * 1024;
+const uploadMaterial = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MATERIAL_MAX_BYTES },
+});
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,6 +43,22 @@ app.use(cookieSession({
 // entrar a los módulos de gestión.
 function requireLoggedIn(req, res, next) {
   if (req.session && req.session.employeeId) return next();
+  return res.status(401).json({ error: 'No autenticado' });
+}
+
+// Los estudiantes (cadetes) tienen su propia cuenta para el portal
+// simplificado, aparte de la de empleado: no fichan ni gestionan nada,
+// así que quedan afuera de requireLoggedIn/requireAuth a propósito.
+function requireCadetLoggedIn(req, res, next) {
+  if (req.session && req.session.cadetId) return next();
+  return res.status(401).json({ error: 'No autenticado' });
+}
+
+// Para endpoints que comparte el staff de la Academia y los estudiantes
+// (como ver/descargar materiales de un curso), sin importar cuál de las
+// dos cuentas sea.
+function requireAnyLogin(req, res, next) {
+  if (req.session && (req.session.employeeId || req.session.cadetId)) return next();
   return res.status(401).json({ error: 'No autenticado' });
 }
 
@@ -97,8 +125,10 @@ async function countDistinctSuperadmins() {
 }
 
 function sessionSnapshot(req) {
+  const isCadet = !!(req.session && req.session.cadetId);
   return {
-    authenticated: !!(req.session && req.session.employeeId),
+    authenticated: !!(req.session && (req.session.employeeId || req.session.cadetId)),
+    role: isCadet ? 'cadet' : (req.session?.employeeId ? 'employee' : null),
     username: req.session?.username || null,
     fullName: req.session?.fullName || null,
     department: req.session?.department || null,
@@ -116,27 +146,53 @@ app.post('/api/login', async (req, res) => {
   if (!username || !password) {
     return res.status(400).json({ error: 'Usuario y contraseña son requeridos' });
   }
+  const trimmedUsername = username.trim();
 
-  const employee = await db.prepare('SELECT * FROM employees WHERE username = ?').get(username.trim());
-  if (!employee || !employee.password_hash || !bcrypt.compareSync(password, employee.password_hash)) {
-    return res.status(401).json({ error: 'Credenciales inválidas' });
+  const employee = await db.prepare('SELECT * FROM employees WHERE username = ?').get(trimmedUsername);
+  if (employee && employee.password_hash && bcrypt.compareSync(password, employee.password_hash)) {
+    if (!employee.active) {
+      return res.status(403).json({ error: 'Tu cuenta está inactiva. Consultá con tu departamento.' });
+    }
+    const grants = await computeGrants(employee.id);
+
+    req.session.role = 'employee';
+    req.session.employeeId = employee.id;
+    req.session.cadetId = undefined;
+    req.session.username = employee.username;
+    req.session.fullName = employee.full_name;
+    req.session.department = employee.department;
+    req.session.isStaff = grants.isStaff;
+    req.session.isSuperadmin = grants.isSuperadmin;
+    req.session.hrAccess = grants.hrAccess;
+    req.session.academyAccess = grants.academyAccess;
+
+    return res.json({ ok: true, ...sessionSnapshot(req) });
   }
-  if (!employee.active) {
-    return res.status(403).json({ error: 'Tu cuenta está inactiva. Consultá con tu departamento.' });
+
+  // Los estudiantes (cadetes) entran con la misma pantalla de login, pero
+  // su cuenta vive en la tabla cadets, no employees: es un portal aparte,
+  // sin ningún acceso al panel de staff.
+  const cadet = await db.prepare('SELECT * FROM cadets WHERE username = ?').get(trimmedUsername);
+  if (cadet && cadet.password_hash && bcrypt.compareSync(password, cadet.password_hash)) {
+    if (cadet.status !== 'activo') {
+      return res.status(403).json({ error: 'Tu cuenta de estudiante no está activa.' });
+    }
+
+    req.session.role = 'cadet';
+    req.session.employeeId = undefined;
+    req.session.cadetId = cadet.id;
+    req.session.username = cadet.username;
+    req.session.fullName = cadet.full_name;
+    req.session.department = cadet.department;
+    req.session.isStaff = false;
+    req.session.isSuperadmin = false;
+    req.session.hrAccess = false;
+    req.session.academyAccess = false;
+
+    return res.json({ ok: true, ...sessionSnapshot(req) });
   }
 
-  const grants = await computeGrants(employee.id);
-
-  req.session.employeeId = employee.id;
-  req.session.username = employee.username;
-  req.session.fullName = employee.full_name;
-  req.session.department = employee.department;
-  req.session.isStaff = grants.isStaff;
-  req.session.isSuperadmin = grants.isSuperadmin;
-  req.session.hrAccess = grants.hrAccess;
-  req.session.academyAccess = grants.academyAccess;
-
-  res.json({ ok: true, ...sessionSnapshot(req) });
+  return res.status(401).json({ error: 'Credenciales inválidas' });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -633,7 +689,8 @@ app.patch('/api/employees/:id', requireAuth, async (req, res) => {
     const trimmed = (fichajeUsername || '').trim();
     if (trimmed) {
       const existingUsername = await db.prepare('SELECT id FROM employees WHERE username = ? AND id != ?').get(trimmed, req.params.id);
-      if (existingUsername) return res.status(409).json({ error: 'Ya hay un empleado con ese usuario de fichaje' });
+      const existingCadetUsername = await db.prepare('SELECT id FROM cadets WHERE username = ?').get(trimmed);
+      if (existingUsername || existingCadetUsername) return res.status(409).json({ error: 'Ya hay una cuenta con ese usuario' });
       username = trimmed;
     } else {
       username = null;
@@ -1244,7 +1301,7 @@ app.post('/api/cadets', requireAuth, requireAcademyAccess, async (req, res) => {
 async function getCadetWithAccess(req, res, id) {
   const row = await db.prepare('SELECT * FROM cadets WHERE id = ?').get(id);
   if (!row) {
-    res.status(404).json({ error: 'Cadete no encontrado' });
+    res.status(404).json({ error: 'Estudiante no encontrado' });
     return null;
   }
   if (!requireDepartmentAccess(req, res, row)) return null;
@@ -1255,15 +1312,44 @@ app.patch('/api/cadets/:id', requireAuth, requireAcademyAccess, async (req, res)
   const row = await getCadetWithAccess(req, res, req.params.id);
   if (!row) return;
 
-  const { fullName, phone, discordInfo, notes, status } = req.body || {};
+  const {
+    fullName, phone, discordInfo, notes, status, studentUsername, studentPassword,
+  } = req.body || {};
   if (status && !VALID_CADET_STATUSES.includes(status)) {
     return res.status(400).json({ error: 'Estado inválido' });
   }
   const nextStatus = status || row.status;
 
+  // El acceso al portal de estudiante es opcional, igual que el de
+  // fichaje de los empleados: se puede definir/cambiar desde acá mismo.
+  // Vaciar el usuario borra también la contraseña (deshabilita el acceso).
+  let username = row.username;
+  let password_hash = row.password_hash;
+  if (studentUsername !== undefined) {
+    const trimmed = (studentUsername || '').trim();
+    if (trimmed) {
+      const existingCadetUsername = await db.prepare('SELECT id FROM cadets WHERE username = ? AND id != ?').get(trimmed, req.params.id);
+      const existingEmployeeUsername = await db.prepare('SELECT id FROM employees WHERE username = ?').get(trimmed);
+      if (existingCadetUsername || existingEmployeeUsername) return res.status(409).json({ error: 'Ya hay una cuenta con ese usuario' });
+      username = trimmed;
+    } else {
+      username = null;
+      password_hash = null;
+    }
+  }
+  if (studentPassword) {
+    if (studentPassword.length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+    if (!username) {
+      return res.status(400).json({ error: 'Definí primero un usuario para el estudiante' });
+    }
+    password_hash = bcrypt.hashSync(studentPassword, 10);
+  }
+
   await db.prepare(`
     UPDATE cadets
-    SET full_name = ?, phone = ?, discord_info = ?, notes = ?, status = ?,
+    SET full_name = ?, phone = ?, discord_info = ?, notes = ?, status = ?, username = ?, password_hash = ?,
         graduated_at = CASE WHEN ? = 'graduado' AND status != 'graduado' THEN datetime('now') ELSE graduated_at END
     WHERE id = ?
   `).run(
@@ -1272,6 +1358,8 @@ app.patch('/api/cadets/:id', requireAuth, requireAcademyAccess, async (req, res)
     discordInfo !== undefined ? ((discordInfo || '').trim() || null) : row.discord_info,
     notes !== undefined ? ((notes || '').trim() || null) : row.notes,
     nextStatus,
+    username,
+    password_hash,
     nextStatus,
     req.params.id,
   );
@@ -1296,7 +1384,7 @@ app.post('/api/cadets/:id/graduate', requireAuth, requireAcademyAccess, async (r
   const row = await getCadetWithAccess(req, res, req.params.id);
   if (!row) return;
   if (row.employee_id) {
-    return res.status(400).json({ error: 'Este cadete ya tiene una cuenta de empleado vinculada' });
+    return res.status(400).json({ error: 'Este estudiante ya tiene una cuenta de empleado vinculada' });
   }
 
   const entryRank = await db.prepare(
@@ -1432,6 +1520,72 @@ app.delete('/api/academy-classes/:id', requireAuth, requireAcademyAccess, async 
   if (course && !courseDepartmentAllowed(req, res, course.department)) return;
 
   await db.prepare('DELETE FROM academy_classes WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---- Materiales del curso (presentaciones, PDFs, etc.) ----
+
+// Un estudiante puede ver/descargar los materiales de los cursos de su
+// propio departamento (o compartidos); el staff de RTD ve todo lo suyo
+// como siempre a través de requireAcademyAccess.
+function canAccessCourseMaterials(req, courseDepartment) {
+  if (req.session.employeeId) {
+    return req.session.isSuperadmin || (req.session.academyAccess
+      && (!scopedDepartment(req) || !courseDepartment || courseDepartment === scopedDepartment(req)));
+  }
+  if (req.session.cadetId) {
+    return !courseDepartment || courseDepartment === req.session.department;
+  }
+  return false;
+}
+
+app.get('/api/academy-courses/:id/materials', requireAnyLogin, async (req, res) => {
+  const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(req.params.id);
+  if (!course) return res.status(404).json({ error: 'Curso no encontrado' });
+  if (!canAccessCourseMaterials(req, course.department)) return res.status(403).json({ error: 'No autorizado' });
+
+  const rows = await db.prepare(`
+    SELECT id, course_id, file_name, mime_type, file_size, uploaded_by, created_at
+    FROM academy_materials WHERE course_id = ? ORDER BY created_at DESC
+  `).all(req.params.id);
+  res.json(rows);
+});
+
+app.post('/api/academy-courses/:id/materials', requireAuth, requireAcademyAccess, uploadMaterial.single('file'), async (req, res) => {
+  const course = await getCourseWithAccess(req, res, req.params.id);
+  if (!course) return;
+  if (!req.file) return res.status(400).json({ error: 'Elegí un archivo' });
+
+  const info = await db.prepare(`
+    INSERT INTO academy_materials (course_id, file_name, mime_type, file_size, data_base64, uploaded_by)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    course.id, req.file.originalname, req.file.mimetype || 'application/octet-stream',
+    req.file.size, req.file.buffer.toString('base64'), req.session.username,
+  );
+
+  res.status(201).json({ id: info.lastInsertRowid });
+});
+
+app.get('/api/academy-materials/:id/download', requireAnyLogin, async (req, res) => {
+  const material = await db.prepare('SELECT * FROM academy_materials WHERE id = ?').get(req.params.id);
+  if (!material) return res.status(404).json({ error: 'No encontrado' });
+  const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(material.course_id);
+  if (!canAccessCourseMaterials(req, course ? course.department : null)) return res.status(403).json({ error: 'No autorizado' });
+
+  const buffer = Buffer.from(material.data_base64, 'base64');
+  res.setHeader('Content-Type', material.mime_type);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(material.file_name)}"`);
+  res.send(buffer);
+});
+
+app.delete('/api/academy-materials/:id', requireAuth, requireAcademyAccess, async (req, res) => {
+  const material = await db.prepare('SELECT * FROM academy_materials WHERE id = ?').get(req.params.id);
+  if (!material) return res.status(404).json({ error: 'No encontrado' });
+  const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(material.course_id);
+  if (course && !courseDepartmentAllowed(req, res, course.department)) return;
+
+  await db.prepare('DELETE FROM academy_materials WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
@@ -1876,6 +2030,57 @@ app.get('/api/report-submissions/:id/pdf', requireLoggedIn, async (req, res) => 
       res.end();
     }
   }
+});
+
+// ---------- Portal de estudiantes (cadetes) ----------
+//
+// Cuenta y sesión completamente aparte de la de empleado: sin fichaje,
+// sin informes, sin acceso a ningún módulo de gestión. Solo pueden ver
+// su propio perfil, los cursos de su departamento (con los materiales
+// que suba RTD) y sus propias evaluaciones.
+
+app.get('/api/student/me', requireCadetLoggedIn, async (req, res) => {
+  const cadet = await db.prepare('SELECT * FROM cadets WHERE id = ?').get(req.session.cadetId);
+  if (!cadet) return res.status(404).json({ error: 'No encontrado' });
+  res.json({
+    id: cadet.id,
+    fullName: cadet.full_name,
+    department: cadet.department,
+    status: cadet.status,
+    createdAt: cadet.created_at,
+    graduatedAt: cadet.graduated_at,
+  });
+});
+
+app.get('/api/student/courses', requireCadetLoggedIn, async (req, res) => {
+  const rows = await db.prepare(`
+    SELECT * FROM academy_courses
+    WHERE active = 1 AND (department IS NULL OR department = ?)
+    ORDER BY name ASC
+  `).all(req.session.department);
+  res.json(rows);
+});
+
+app.get('/api/student/evaluations', requireCadetLoggedIn, async (req, res) => {
+  const rows = await db.prepare(`
+    SELECT ev.*, co.name AS course_name
+    FROM academy_evaluations ev
+    LEFT JOIN academy_courses co ON co.id = ev.course_id
+    WHERE ev.cadet_id = ?
+    ORDER BY ev.created_at DESC
+  `).all(req.session.cadetId);
+  res.json(rows);
+});
+
+// Manejo del error de multer (archivo demasiado grande) para que llegue
+// como un JSON legible en vez de tumbar la request con un stack trace.
+// Tiene que ir después de todas las rutas para que le lleguen los
+// errores que salten en cualquiera de ellas (acá, la subida de materiales).
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: `El archivo supera el máximo permitido (${Math.floor(MATERIAL_MAX_BYTES / (1024 * 1024))}MB)` });
+  }
+  next(err);
 });
 
 if (require.main === module) {

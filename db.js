@@ -259,6 +259,17 @@ async function setup() {
       body TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS academy_materials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      course_id INTEGER NOT NULL REFERENCES academy_courses(id),
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      data_base64 TEXT NOT NULL,
+      uploaded_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // employees y admins ya existían con datos reales antes de sumar estas
@@ -276,6 +287,13 @@ async function setup() {
   // Índice único parcial-friendly: SQLite trata cada NULL como distinto en
   // un UNIQUE INDEX, así que varios empleados sin usuario de fichaje conviven bien.
   await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_username ON employees(username)');
+
+  // Los estudiantes (cadetes) también pueden tener su propia cuenta para
+  // entrar a un portal simplificado (ver materiales de sus cursos y sus
+  // propias evaluaciones) sin acceso al panel de staff.
+  await ensureColumn('cadets', 'username TEXT');
+  await ensureColumn('cadets', 'password_hash TEXT');
+  await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_cadets_username ON cadets(username)');
 
   // El acceso (staff / superadmin / RRHH-Fichajes) ya no son casilleros
   // sueltos por empleado: los otorga la división a la que pertenece. Un
