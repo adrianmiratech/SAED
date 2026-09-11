@@ -9,10 +9,12 @@ const db = require('./db');
 
 // Los materiales de curso (presentaciones, PDFs, etc.) se guardan como
 // base64 directo en la base (Turso), no en el filesystem: en Vercel las
-// funciones serverless no tienen disco persistente. El límite de 4MB
-// queda por debajo del tope de tamaño de request de las funciones
-// serverless de Vercel (4.5MB), para no cortarse antes de llegar acá.
-const MATERIAL_MAX_BYTES = 4 * 1024 * 1024;
+// funciones serverless no tienen disco persistente. El límite de 3MB
+// (~4MB ya en base64) queda con margen por debajo tanto del tope de
+// tamaño de request de las funciones serverless de Vercel (4.5MB) como
+// de cualquier límite propio que tenga la API HTTP de Turso para un
+// solo parámetro de sentencia SQL.
+const MATERIAL_MAX_BYTES = 3 * 1024 * 1024;
 const uploadMaterial = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MATERIAL_MAX_BYTES },
@@ -1540,53 +1542,91 @@ function canAccessCourseMaterials(req, courseDepartment) {
 }
 
 app.get('/api/academy-courses/:id/materials', requireAnyLogin, async (req, res) => {
-  const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(req.params.id);
-  if (!course) return res.status(404).json({ error: 'Curso no encontrado' });
-  if (!canAccessCourseMaterials(req, course.department)) return res.status(403).json({ error: 'No autorizado' });
+  try {
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(req.params.id);
+    if (!course) return res.status(404).json({ error: 'Curso no encontrado' });
+    if (!canAccessCourseMaterials(req, course.department)) return res.status(403).json({ error: 'No autorizado' });
 
-  const rows = await db.prepare(`
-    SELECT id, course_id, file_name, mime_type, file_size, uploaded_by, created_at
-    FROM academy_materials WHERE course_id = ? ORDER BY created_at DESC
-  `).all(req.params.id);
-  res.json(rows);
+    const rows = await db.prepare(`
+      SELECT id, course_id, file_name, mime_type, file_size, uploaded_by, created_at
+      FROM academy_materials WHERE course_id = ? ORDER BY created_at DESC
+    `).all(req.params.id);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error listando materiales', req.params.id, err);
+    res.status(500).json({ error: 'No se pudieron cargar los materiales' });
+  }
 });
 
-app.post('/api/academy-courses/:id/materials', requireAuth, requireAcademyAccess, uploadMaterial.single('file'), async (req, res) => {
-  const course = await getCourseWithAccess(req, res, req.params.id);
-  if (!course) return;
-  if (!req.file) return res.status(400).json({ error: 'Elegí un archivo' });
+// uploadMaterial.single('file') puede tirar (ej: MulterError si el
+// archivo supera el límite) antes de que el handler de abajo arranque;
+// por eso ese error también se maneja acá y no solo en el catch del
+// handler, para que en cualquier caso llegue una respuesta JSON legible
+// en vez de dejar la request colgada para siempre (sin esto, un error acá
+// -incluyendo uno de Turso al insertar un parámetro muy grande- no
+// devuelve nada y en el navegador se ve como "no me deja subir archivos").
+app.post('/api/academy-courses/:id/materials', requireAuth, requireAcademyAccess, (req, res, next) => {
+  uploadMaterial.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: `El archivo supera el máximo permitido (${Math.floor(MATERIAL_MAX_BYTES / (1024 * 1024))}MB)` });
+    }
+    if (err) {
+      console.error('Error subiendo material (multer)', req.params.id, err);
+      return res.status(400).json({ error: 'No se pudo procesar el archivo' });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const course = await getCourseWithAccess(req, res, req.params.id);
+    if (!course) return;
+    if (!req.file) return res.status(400).json({ error: 'Elegí un archivo' });
 
-  const info = await db.prepare(`
-    INSERT INTO academy_materials (course_id, file_name, mime_type, file_size, data_base64, uploaded_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    course.id, req.file.originalname, req.file.mimetype || 'application/octet-stream',
-    req.file.size, req.file.buffer.toString('base64'), req.session.username,
-  );
+    const info = await db.prepare(`
+      INSERT INTO academy_materials (course_id, file_name, mime_type, file_size, data_base64, uploaded_by)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      course.id, req.file.originalname, req.file.mimetype || 'application/octet-stream',
+      req.file.size, req.file.buffer.toString('base64'), req.session.username,
+    );
 
-  res.status(201).json({ id: info.lastInsertRowid });
+    res.status(201).json({ id: info.lastInsertRowid });
+  } catch (err) {
+    console.error('Error subiendo material', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo subir el archivo. Probá con uno más chico.' });
+  }
 });
 
 app.get('/api/academy-materials/:id/download', requireAnyLogin, async (req, res) => {
-  const material = await db.prepare('SELECT * FROM academy_materials WHERE id = ?').get(req.params.id);
-  if (!material) return res.status(404).json({ error: 'No encontrado' });
-  const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(material.course_id);
-  if (!canAccessCourseMaterials(req, course ? course.department : null)) return res.status(403).json({ error: 'No autorizado' });
+  try {
+    const material = await db.prepare('SELECT * FROM academy_materials WHERE id = ?').get(req.params.id);
+    if (!material) return res.status(404).json({ error: 'No encontrado' });
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(material.course_id);
+    if (!canAccessCourseMaterials(req, course ? course.department : null)) return res.status(403).json({ error: 'No autorizado' });
 
-  const buffer = Buffer.from(material.data_base64, 'base64');
-  res.setHeader('Content-Type', material.mime_type);
-  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(material.file_name)}"`);
-  res.send(buffer);
+    const buffer = Buffer.from(material.data_base64, 'base64');
+    res.setHeader('Content-Type', material.mime_type);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(material.file_name)}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('Error descargando material', req.params.id, err);
+    if (!res.headersSent) res.status(500).json({ error: 'No se pudo descargar el archivo' });
+  }
 });
 
 app.delete('/api/academy-materials/:id', requireAuth, requireAcademyAccess, async (req, res) => {
-  const material = await db.prepare('SELECT * FROM academy_materials WHERE id = ?').get(req.params.id);
-  if (!material) return res.status(404).json({ error: 'No encontrado' });
-  const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(material.course_id);
-  if (course && !courseDepartmentAllowed(req, res, course.department)) return;
+  try {
+    const material = await db.prepare('SELECT * FROM academy_materials WHERE id = ?').get(req.params.id);
+    if (!material) return res.status(404).json({ error: 'No encontrado' });
+    const course = await db.prepare('SELECT * FROM academy_courses WHERE id = ?').get(material.course_id);
+    if (course && !courseDepartmentAllowed(req, res, course.department)) return;
 
-  await db.prepare('DELETE FROM academy_materials WHERE id = ?').run(req.params.id);
-  res.json({ ok: true });
+    await db.prepare('DELETE FROM academy_materials WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error eliminando material', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo eliminar el material' });
+  }
 });
 
 // Listado de evaluaciones de todos los cadetes en un solo lugar (no una

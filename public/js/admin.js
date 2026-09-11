@@ -3274,6 +3274,8 @@ function renderMaterials(rows) {
   });
 }
 
+const MATERIAL_MAX_BYTES = 3 * 1024 * 1024;
+
 document.getElementById('material-upload-btn').addEventListener('click', async () => {
   if (!currentCourseId) return;
   const msg = document.getElementById('material-message');
@@ -3285,6 +3287,11 @@ document.getElementById('material-upload-btn').addEventListener('click', async (
   if (!file) {
     msg.className = 'message error';
     msg.textContent = 'Elegí un archivo primero.';
+    return;
+  }
+  if (file.size > MATERIAL_MAX_BYTES) {
+    msg.className = 'message error';
+    msg.textContent = `Ese archivo pesa ${(file.size / (1024 * 1024)).toFixed(1)}MB, el máximo es 3MB.`;
     return;
   }
 
@@ -3299,7 +3306,15 @@ document.getElementById('material-upload-btn').addEventListener('click', async (
       method: 'POST',
       body: formData,
     });
-    const data = await res.json();
+    // Si el servidor devuelve algo que no sea JSON (ej: una página de
+    // error del hosting ante un request rechazado antes de llegar a la
+    // app), evitamos que eso se vea como un error críptico de parseo.
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error('El servidor no devolvió una respuesta válida. Probá con un archivo más chico.');
+    }
     if (!res.ok) throw new Error(data.error || 'No se pudo subir el archivo');
 
     fileInput.value = '';
