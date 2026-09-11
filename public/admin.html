@@ -9,7 +9,9 @@
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar">
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="brand">
           <span class="brand-mark">✚</span>
@@ -18,6 +20,7 @@
             <span class="tagline">Gestión Sanitaria Integral</span>
           </span>
         </div>
+        <button class="sidebar-close-btn" id="sidebar-close-btn" aria-label="Cerrar menú">✕</button>
       </div>
 
       <nav class="sidebar-nav" id="main-tabs">
@@ -40,9 +43,12 @@
 
     <div class="main-area">
       <div class="page-header">
-        <div class="page-header-title">
-          <h1 id="page-title">Postulaciones</h1>
-          <p id="page-subtitle">Revisá, filtrá y gestioná las postulaciones a SAMS y SAFD.</p>
+        <div class="page-header-title" style="display:flex; align-items:center; gap:12px;">
+          <button class="menu-toggle-btn" id="menu-toggle-btn" aria-label="Abrir menú">☰</button>
+          <div>
+            <h1 id="page-title">Postulaciones</h1>
+            <p id="page-subtitle">Revisá, filtrá y gestioná las postulaciones a SAMS y SAFD.</p>
+          </div>
         </div>
         <div class="top-actions">
           <button id="manage-staff-btn" class="btn-ghost btn-sm" style="display:none">Gestionar staff</button>

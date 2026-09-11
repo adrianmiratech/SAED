@@ -418,6 +418,30 @@ document.getElementById('logout-btn').addEventListener('click', async (e) => {
   window.location.href = '/login.html';
 });
 
+// ---------- Menú lateral en mobile (cajón deslizante) ----------
+
+const sidebarEl = document.getElementById('sidebar');
+const sidebarBackdrop = document.getElementById('sidebar-backdrop');
+const menuToggleBtn = document.getElementById('menu-toggle-btn');
+const sidebarCloseBtn = document.getElementById('sidebar-close-btn');
+
+function openSidebar() {
+  sidebarEl.classList.add('open');
+  sidebarBackdrop.classList.add('open');
+}
+
+function closeSidebar() {
+  sidebarEl.classList.remove('open');
+  sidebarBackdrop.classList.remove('open');
+}
+
+menuToggleBtn.addEventListener('click', openSidebar);
+sidebarCloseBtn.addEventListener('click', closeSidebar);
+sidebarBackdrop.addEventListener('click', closeSidebar);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && sidebarEl.classList.contains('open')) closeSidebar();
+});
+
 document.getElementById('export-btn').addEventListener('click', () => {
   const params = new URLSearchParams();
   if (currentStatusFilter) params.set('status', currentStatusFilter);
@@ -433,6 +457,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
     document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
+    closeSidebar();
     const tab = btn.dataset.tab;
 
     TAB_IDS.forEach((id) => {
