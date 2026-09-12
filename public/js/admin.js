@@ -3176,10 +3176,18 @@ courseForm.addEventListener('submit', async (e) => {
 courseDeleteBtn.addEventListener('click', async () => {
   if (!currentCourseId) return;
   if (!confirm('¿Eliminar este curso y sus clases programadas?')) return;
-  await fetch(`/api/academy-courses/${currentCourseId}`, { method: 'DELETE' });
-  closeCourseModal();
-  await loadAcademyCourses();
-  showToast('Curso eliminado.', 'danger');
+  try {
+    const res = await fetch(`/api/academy-courses/${currentCourseId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'No se pudo eliminar el curso.');
+    }
+    closeCourseModal();
+    await loadAcademyCourses();
+    showToast('Curso eliminado.', 'danger');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 });
 
 document.getElementById('new-course-btn').addEventListener('click', openNewCourseModal);

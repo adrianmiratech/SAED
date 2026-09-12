@@ -1470,13 +1470,33 @@ app.patch('/api/academy-courses/:id', requireAuth, requireAcademyAccess, async (
 });
 
 app.delete('/api/academy-courses/:id', requireAuth, requireAcademyAccess, async (req, res) => {
-  const row = await getCourseWithAccess(req, res, req.params.id);
-  if (!row) return;
+  try {
+    const row = await getCourseWithAccess(req, res, req.params.id);
+    if (!row) return;
 
-  await db.prepare('DELETE FROM academy_classes WHERE course_id = ?').run(req.params.id);
-  await db.prepare('UPDATE academy_evaluations SET course_id = NULL WHERE course_id = ?').run(req.params.id);
-  await db.prepare('DELETE FROM academy_courses WHERE id = ?').run(req.params.id);
-  res.json({ ok: true });
+    // Los exámenes y materiales del curso tienen course_id NOT NULL, así que
+    // hay que borrarlos (con toda su cascada) antes de poder borrar el curso:
+    // si no, la FK constraint hace fallar el DELETE de academy_courses.
+    const examIds = (await db.prepare('SELECT id FROM academy_exams WHERE course_id = ?').all(req.params.id)).map((e) => e.id);
+    for (const examId of examIds) {
+      const submissionIds = (await db.prepare('SELECT id FROM academy_exam_submissions WHERE exam_id = ?').all(examId)).map((s) => s.id);
+      for (const subId of submissionIds) {
+        await db.prepare('DELETE FROM academy_exam_answers WHERE submission_id = ?').run(subId);
+      }
+      await db.prepare('UPDATE academy_evaluations SET exam_submission_id = NULL WHERE exam_submission_id IN (SELECT id FROM academy_exam_submissions WHERE exam_id = ?)').run(examId);
+      await db.prepare('DELETE FROM academy_exam_submissions WHERE exam_id = ?').run(examId);
+      await db.prepare('DELETE FROM academy_exam_questions WHERE exam_id = ?').run(examId);
+    }
+    await db.prepare('DELETE FROM academy_exams WHERE course_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM academy_materials WHERE course_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM academy_classes WHERE course_id = ?').run(req.params.id);
+    await db.prepare('UPDATE academy_evaluations SET course_id = NULL WHERE course_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM academy_courses WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error eliminando curso', req.params.id, err);
+    res.status(500).json({ error: 'No se pudo eliminar el curso' });
+  }
 });
 
 app.get('/api/academy-courses/:id/classes', requireAuth, requireAcademyAccess, async (req, res) => {
